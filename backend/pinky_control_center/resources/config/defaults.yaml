@@ -1,0 +1,3 @@
+mode: mock
+map_id: mock_lab
+target_distance_m: 0.8

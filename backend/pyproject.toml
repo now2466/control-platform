@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=75.8,<76"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinky-control-center"
+version = "0.1.0"
+description = "Mock-first control API for the Pinky Pro robot pair"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi==0.115.6",
+  "pillow==11.0.0",
+  "pydantic==2.10.4",
+  "uvicorn[standard]==0.34.0",
+]
+
+[project.optional-dependencies]
+dev = ["httpx==0.28.1", "pytest==8.3.4"]
+
+[project.scripts]
+pinky-control-center = "pinky_control_center.main:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:launch_testing -p no:launch_ros"
+
+[tool.setuptools.packages.find]
+include = ["pinky_control_center*"]
+
+[tool.setuptools.package-data]
+pinky_control_center = ["resources/config/*.yaml"]
