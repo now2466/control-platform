@@ -28,4 +28,4 @@ addopts = "-p no:launch_testing -p no:launch_ros"
 include = ["pinky_control_center*"]
 
 [tool.setuptools.package-data]
-pinky_control_center = ["resources/config/*.yaml"]
+pinky_control_center = ["resources/config/*.yaml", "migrations/*.sql"]

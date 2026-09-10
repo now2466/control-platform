@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+from importlib import resources
+import secrets
+import sqlite3
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import UUID, uuid4
+
+from pinky_control_center.models import ControlLease, UserInfo, UserRole
+
+Clock = Callable[[], datetime]
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat()
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value).astimezone(UTC)
+
+
+def hash_password(password: str) -> str:
+    """Use a salted, memory-hard stdlib hash; plaintext never reaches SQLite."""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return "scrypt$16384$8$1$%s$%s" % (base64.b64encode(salt).decode(), base64.b64encode(digest).decode())
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, n, r, p, salt_text, digest_text = encoded.split("$")
+        if algorithm != "scrypt":
+            return False
+        salt = base64.b64decode(salt_text)
+        expected = base64.b64decode(digest_text)
+        actual = hashlib.scrypt(password.encode(), salt=salt, n=int(n), r=int(r), p=int(p), dklen=len(expected))
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(actual, expected)
+
+
+class Storage:
+    def __init__(self, database_path: Path, clock: Clock = utc_now, lease_end_hook: Callable[[str], None] | None = None) -> None:
+        self.database_path = database_path
+        self.clock = clock
+        self.lease_end_hook = lease_end_hook or (lambda _reason: None)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(database_path, check_same_thread=False)
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA journal_mode=WAL")
+        self.connection.execute("PRAGMA foreign_keys=ON")
+        self._migrate()
+
+    def _migrate(self) -> None:
+        sql = resources.files("pinky_control_center").joinpath("migrations", "001_initial.sql").read_text(encoding="utf-8")
+        with self.connection:
+            self.connection.executescript(sql)
+            columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(control_leases)")}
+            if "session_token_hash" not in columns:
+                self.connection.execute("ALTER TABLE control_leases ADD COLUMN session_token_hash TEXT NOT NULL DEFAULT 'legacy'")
+            self.connection.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, ?)", (_timestamp(self.clock()),))
+
+    def close(self) -> None:
+        self.connection.close()
+
+    def create_or_reset_user(self, username: str, password: str, role: UserRole) -> UserInfo:
+        user_id = uuid4()
+        with self.connection:
+            existing = self.connection.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+            if existing:
+                user_id = UUID(existing["id"])
+                self.connection.execute("UPDATE users SET password_hash=?, role=? WHERE id=?", (hash_password(password), role.value, str(user_id)))
+            else:
+                self.connection.execute(
+                    "INSERT INTO users(id, username, password_hash, role, created_at) VALUES(?,?,?,?,?)",
+                    (str(user_id), username, hash_password(password), role.value, _timestamp(self.clock())),
+                )
+        return UserInfo(user_id=user_id, username=username, role=role)
+
+    def authenticate(self, username: str, password: str) -> UserInfo | None:
+        row = self.connection.execute("SELECT id, username, password_hash, role FROM users WHERE username=?", (username,)).fetchone()
+        if row is None or not verify_password(password, row["password_hash"]):
+            return None
+        return UserInfo(user_id=UUID(row["id"]), username=row["username"], role=UserRole(row["role"]))
+
+    def create_session(self, user: UserInfo) -> tuple[str, str]:
+        token = secrets.token_urlsafe(32)
+        csrf = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        expires_at = self.clock() + timedelta(hours=8)
+        with self.connection:
+            self.connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (_timestamp(self.clock()),))
+            self.connection.execute(
+                "INSERT INTO sessions(token_hash,user_id,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)",
+                (token_hash, str(user.user_id), csrf, _timestamp(expires_at), _timestamp(self.clock())),
+            )
+        return token, csrf
+
+    def session_user(self, token: str | None) -> tuple[UserInfo, str] | None:
+        if not token:
+            return None
+        row = self.connection.execute(
+            "SELECT users.id, users.username, users.role, sessions.csrf_token, sessions.expires_at "
+            "FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=?",
+            (hashlib.sha256(token.encode()).hexdigest(),),
+        ).fetchone()
+        if row is None or _parse_timestamp(row["expires_at"]) <= self.clock():
+            return None
+        return UserInfo(user_id=UUID(row["id"]), username=row["username"], role=UserRole(row["role"])), row["csrf_token"]
+
+    @staticmethod
+    def token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def delete_session(self, token: str | None) -> None:
+        if token:
+            token_hash = self.token_hash(token)
+            with self.connection:
+                lease = self.connection.execute("DELETE FROM control_leases WHERE session_token_hash=?", (token_hash,))
+                self.connection.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash,))
+            if lease.rowcount:
+                self.lease_end_hook("SESSION_LOGOUT")
+
+    def acquire_lease(self, user: UserInfo, request_id: UUID, session_token: str = "direct") -> ControlLease:
+        now = self.clock()
+        session_token_hash = self.token_hash(session_token)
+        with self.connection:
+            self.connection.execute("DELETE FROM control_leases WHERE expires_at <= ?", (_timestamp(now),))
+            row = self.connection.execute("SELECT id,user_id,session_token_hash,expires_at FROM control_leases LIMIT 1").fetchone()
+            if row and (row["user_id"] != str(user.user_id) or row["session_token_hash"] != session_token_hash):
+                raise LeaseConflict("another operator holds the control lease")
+            if row:
+                lease_id = UUID(row["id"])
+            else:
+                lease_id = uuid4()
+                self.connection.execute("INSERT INTO control_leases(id,user_id,session_token_hash,expires_at,request_id,created_at) VALUES(?,?,?,?,?,?)", (str(lease_id), str(user.user_id), session_token_hash, _timestamp(now), str(request_id), _timestamp(now)))
+            expires_at = now + timedelta(seconds=3)
+            self.connection.execute("UPDATE control_leases SET expires_at=?, request_id=? WHERE id=?", (_timestamp(expires_at), str(request_id), str(lease_id)))
+        return ControlLease(lease_id=lease_id, expires_at=expires_at)
+
+    def renew_lease(self, lease_id: UUID, user: UserInfo, request_id: UUID, session_token: str = "direct") -> ControlLease:
+        now = self.clock()
+        row = self.connection.execute("SELECT user_id,session_token_hash,expires_at FROM control_leases WHERE id=?", (str(lease_id),)).fetchone()
+        if row is None or row["user_id"] != str(user.user_id) or row["session_token_hash"] != self.token_hash(session_token) or _parse_timestamp(row["expires_at"]) <= now:
+            raise LeaseNotFound("control lease is missing or expired")
+        return self.acquire_lease(user, request_id, session_token)
+
+    def release_lease(self, lease_id: UUID, user: UserInfo, session_token: str = "direct") -> None:
+        session_token_hash = self.token_hash(session_token)
+        with self.connection:
+            result = self.connection.execute("DELETE FROM control_leases WHERE id=? AND user_id=? AND session_token_hash=?", (str(lease_id), str(user.user_id), session_token_hash))
+        if result.rowcount != 1:
+            raise LeaseNotFound("control lease is missing or owned by another user")
+        self.lease_end_hook("LEASE_RELEASED")
+
+
+class LeaseConflict(Exception):
+    pass
+
+
+class LeaseNotFound(Exception):
+    pass

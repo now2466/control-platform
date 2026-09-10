@@ -2,7 +2,7 @@
 
 작성일: 2026-09-10 · 버전: 1.0 · 상태: 구현 기준안
 
-마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. 현재 T01 계약·모의 실행 기반과 최소 웹 화면을 제공하며, 지도·카메라 대시보드와 실물 연동은 후속 단계다.
+마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. 현재 T01 모의 실행 기반과 T02 저장·인증·상태 배포를 제공하며, 지도·카메라 대시보드와 실물 연동은 후속 단계다.
 
 ## 실행
 
@@ -18,12 +18,25 @@ cd frontend && npm install && npm run dev
 cd backend && .venv/bin/python -m pinky_control_center.main --mode mock --host 127.0.0.1 --port 8081
 ```
 
+T02 인증을 처음 실행할 때는 먼저 DB와 관리자 계정을 만든다. backend가 제공하는 실제 CLI는 아래와 같다.
+
+```bash
+cd backend
+mkdir -p ~/.local/state/control-platform
+.venv/bin/python -m pinky_control_center.main --database ~/.local/state/control-platform/control.db \
+  --reset-password operator --password '<로컬에서만 입력할 비밀번호>' --role ADMIN
+.venv/bin/python -m pinky_control_center.main --mode mock --host 127.0.0.1 --port 8081 \
+  --database ~/.local/state/control-platform/control.db
+```
+
+운영 DB 기본 경로는 `${XDG_STATE_HOME:-~/.local/state}/control-platform/control.db`이며 `--database`로 변경할 수 있다. `--reset-password`는 계정을 생성하거나 비밀번호를 재설정한다. 비밀번호는 저장소나 로그에 기록하지 않는다. 기본 frontend Origin은 `http://localhost:5173`이며 backend의 `create_app(..., allowed_origin=...)` 계약과 일치해야 한다. 세션은 HttpOnly `cc_session`, CSRF는 읽을 수 있는 `cc_csrf` 쿠키로 전달하고, frontend는 로그인 뒤 인증된 상태 API와 `/ws/state`를 사용한다.
+
 ## 단계
 
 | 단계 | 범위 | 상태 |
 |---|---|---|
 | T01 | 계약·환경·모의 실행·기본 화면 | 완료 |
-| T02 | 저장·인증·상태 배포 | 미구현 |
+| T02 | 저장·인증·상태 배포 | 완료 |
 | T03 | 지도·로봇 카드 | 미구현 |
 | T04 | 카메라 그리드 | 미구현 |
 | T05 | 정지·수동 조작·권한 | 미구현 |
@@ -38,6 +51,8 @@ cd backend && .venv/bin/python -m pinky_control_center.main --mode mock --host 1
 | T14 | 통합 인수·실물 검증 | 미구현 |
 
 이번 단계의 화면은 상태 API 연결과 두 로봇 식별 정보 확인만 지원한다. 완성형 지도, 카메라 스트리밍, 제어 기능은 T03/T04 이후 범위다.
+
+T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
 
 ## 읽는 순서
 

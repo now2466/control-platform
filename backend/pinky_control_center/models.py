@@ -35,6 +35,12 @@ class Role(StrEnum):
     SLAVE = "SLAVE"
 
 
+class UserRole(StrEnum):
+    VIEWER = "VIEWER"
+    OPERATOR = "OPERATOR"
+    ADMIN = "ADMIN"
+
+
 class RobotMode(StrEnum):
     IDLE = "IDLE"
     AUTO = "AUTO"
@@ -278,6 +284,36 @@ class ErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     error: ErrorBody
     request_id: UUID | None = None
+
+
+class UserInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user_id: UUID
+    username: str
+    role: UserRole
+
+
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=8, max_length=1024)
+
+
+class LoginResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    user: UserInfo
+    csrf_token: str = Field(min_length=32)
+
+
+class LeaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+
+
+class ControlLease(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lease_id: UUID
+    expires_at: datetime
 
 
 class StateSnapshot(BaseModel):

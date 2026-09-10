@@ -13,6 +13,17 @@ from pinky_control_center.adapters.mock import MockRobotAdapter
 from pinky_control_center.config import MockConfig, load_mock_config
 from pinky_control_center.main import create_app
 from pinky_control_center.models import Alert, CommandRequest, FormationState, Mission, MockScenario, Pose, RobotState
+from pinky_control_center.models import UserRole
+
+
+ORIGIN = "http://localhost:5173"
+
+
+def login_operator(client: TestClient) -> str:
+    client.app.state.storage.create_or_reset_user("contract-admin", "correct-horse-battery", UserRole.ADMIN)
+    response = client.post("/api/v1/session", json={"username": "contract-admin", "password": "correct-horse-battery"}, headers={"origin": ORIGIN})
+    assert response.status_code == 200
+    return response.json()["csrf_token"]
 
 
 def test_rejects_nan_and_out_of_range_contract_values() -> None:
@@ -56,8 +67,9 @@ def test_mock_config_rejects_duplicate_namespaces_and_is_used_by_adapter() -> No
     assert MockRobotAdapter(config=config).snapshot().robots[0].name == "Pinky Master"
 
 
-def test_state_contract_has_exactly_two_distinct_robots() -> None:
-    with TestClient(create_app()) as client:
+def test_state_contract_has_exactly_two_distinct_robots(tmp_path: Path) -> None:
+    with TestClient(create_app(database_path=tmp_path / "control.db")) as client:
+        login_operator(client)
         response = client.get("/api/v1/state")
     assert response.status_code == 200
     body = response.json()
@@ -67,31 +79,34 @@ def test_state_contract_has_exactly_two_distinct_robots() -> None:
     assert body["robots"][1]["role"] == "SLAVE"
 
 
-def test_mock_scenarios_change_only_the_expected_robot_or_formation() -> None:
-    with TestClient(create_app()) as client:
-        assert client.post("/api/v1/mock/scenario", json={"scenario": "slave_offline"}).status_code == 200
+def test_mock_scenarios_change_only_the_expected_robot_or_formation(tmp_path: Path) -> None:
+    with TestClient(create_app(database_path=tmp_path / "control.db")) as client:
+        csrf = login_operator(client)
+        headers = {"origin": ORIGIN, "x-csrf-token": csrf}
+        assert client.post("/api/v1/mock/scenario", json={"scenario": "slave_offline"}, headers=headers).status_code == 200
         state = client.get("/api/v1/state").json()
         assert state["robots"][1]["connection"] == "OFFLINE"
-        assert client.post("/api/v1/mock/scenario", json={"scenario": "follow_lost"}).status_code == 200
+        assert client.post("/api/v1/mock/scenario", json={"scenario": "follow_lost"}, headers=headers).status_code == 200
         assert client.get("/api/v1/state").json()["formation"]["state"] == "LOST"
 
 
-def test_camera_images_are_jpeg_and_are_distinct_per_robot() -> None:
-    with TestClient(create_app()) as client:
+def test_camera_images_are_jpeg_and_are_distinct_per_robot(tmp_path: Path) -> None:
+    with TestClient(create_app(database_path=tmp_path / "control.db")) as client:
+        csrf = login_operator(client)
         master = client.get("/api/v1/cameras/robot_1")
         slave = client.get("/api/v1/cameras/robot_2")
         assert master.headers["content-type"] == "image/jpeg"
         assert master.content.startswith(b"\xff\xd8")
         assert slave.content.startswith(b"\xff\xd8")
         assert master.content != slave.content
-        client.post("/api/v1/mock/scenario", json={"scenario": "camera_stall"})
+        client.post("/api/v1/mock/scenario", json={"scenario": "camera_stall"}, headers={"origin": ORIGIN, "x-csrf-token": csrf})
         assert client.get("/api/v1/cameras/robot_2").status_code == 503
         assert client.get("/api/v1/cameras/robot_1").status_code == 200
 
 
-def test_ros_mode_is_not_silently_replaced_by_mock() -> None:
+def test_ros_mode_is_not_silently_replaced_by_mock(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        create_app("ros")
+        create_app("ros", database_path=tmp_path / "control.db")
 
 
 def test_mock_execute_returns_acceptance_before_completion_event() -> None:

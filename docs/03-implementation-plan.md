@@ -97,12 +97,12 @@ class RobotAdapter(Protocol):
 
 ### T02 — 저장·인증·상태 배포 (R03, R18, N04, N09)
 
-파일: storage.py, migrations/001_initial.sql, auth.py, state_store.py, api/session.py, api/state.py, test_auth.py, test_state.py.
+파일: backend/pinky_control_center/storage.py, backend/pinky_control_center/migrations/001_initial.sql, backend/pinky_control_center/auth.py, backend/pinky_control_center/state_store.py, backend/pinky_control_center/api/session.py, backend/pinky_control_center/api/state.py, backend/tests/test_auth.py, backend/tests/test_state.py.
 
-- [ ] SQLite migration 및 명령 request_id unique 제약을 생성한다. 비밀번호 초기화 CLI를 제공하고 평문 비밀번호를 DB/로그에 남기지 않는다.
-- [ ] session·역할·CSRF·Origin 검사, lease 생성/갱신/반납을 구현한다.
-- [ ] 상태 snapshot과 5Hz WS 배포, field별 freshness, 재접속 snapshot 복구를 구현한다.
-- [ ] 가짜 시계로 위치 1초·배터리 15초를 각각 넘겨 잘못된 정상 표시가 없는지 확인한다.
+- [x] SQLite migration 및 명령 request_id unique 제약을 생성한다. 비밀번호 초기화 CLI를 제공하고 평문 비밀번호를 DB/로그에 남기지 않는다.
+- [x] session·역할·CSRF·Origin 검사, lease 생성/갱신/반납을 구현한다.
+- [x] 상태 snapshot과 5Hz WS 배포, field별 freshness, 재접속 snapshot 복구를 구현한다.
+- [x] 가짜 시계로 위치 1초·배터리 15초를 각각 넘겨 잘못된 정상 표시가 없는지 확인한다.
 
 검증: `python -m pytest backend/tests/test_auth.py backend/tests/test_state.py -q`. 401/403, 중복 제어권 409, 상태 끊김·복구 통과.
 
