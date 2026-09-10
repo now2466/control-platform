@@ -56,7 +56,7 @@ T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적
 
 T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
 
-실물 연결은 로봇별 rosbridge websocket을 사용한다. 각 로봇은 서로 다른 `ROS_DOMAIN_ID`와 설정된 rosbridge endpoint를 가지며, backend의 RobotAdapter가 두 연결을 관리한다. 브라우저는 rosbridge에 직접 연결하지 않는다. endpoint, 인증/TLS, 토픽 매핑은 설정으로 관리하고 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
+실물 연결은 로봇별 rosbridge websocket을 사용한다. 배포 고정값은 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`이며 관제 UI/API에서 domain ID를 변경하지 않는다. backend의 RobotAdapter가 두 연결을 관리하고 bridge URL·인증/TLS·토픽 매핑만 설정으로 관리한다. 브라우저는 rosbridge에 직접 연결하지 않으며 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
 
 ## 읽는 순서
 

@@ -209,8 +209,8 @@ class RobotAdapter(Protocol):
 
 파일: ros/pinky_control_interfaces 전체, backend/pinky_control_center/adapters/ros.py, backend/config/robots.ros.yaml, backend/launch 파일, backend/tests/test_ros_mapping.py, docs/integration-report.md.
 
-- [ ] 로봇별 rosbridge websocket endpoint, 서로 다른 ROS_DOMAIN_ID, topic/service/action 목록과 실제 타입·QoS, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 docs/integration-report.md에 기록한다.
-- [ ] `backend/config/robots.yaml`의 endpoint/domain/credentials/TLS/mapping으로 RobotAdapter를 두 개 구성하고 rosbridge JSON 요청·feedback·결과를 연결한다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
+- [ ] 로봇별 rosbridge websocket endpoint, 고정 ROS_DOMAIN_ID(`robot_1=12`, `robot_2=13`), topic/service/action 목록과 실제 타입·QoS, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 docs/integration-report.md에 기록한다.
+- [ ] T12 예정 `backend/config/robots.ros.yaml`에 bridge endpoint/credentials/TLS/mapping과 고정 domain(`robot_1: 12`, `robot_2: 13`)을 기록하고 RobotAdapter를 두 개 구성해 rosbridge JSON 요청·feedback·결과를 연결한다. rosbridge 프로세스는 각 domain 환경으로 시작하며 관제 UI/API로 domain을 변경하지 않는다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
 - [ ] namespaced 토픽과 TF를 각기 검증한다. 기존 고정 odom/base_footprint는 로봇 담당과 수정·설정하고 TF 경로를 실측 확인한다.
 - [ ] 로봇 담당이 control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog을 구현한 결과를 연결한다. 미제공 기능은 UNSUPPORTED를 유지한다.
 - [ ] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다.

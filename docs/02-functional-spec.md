@@ -166,7 +166,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 두 로봇이 공통 map에서 위치 추정하는 구성을 기본으로 한다. 목표 TF는 `map → robot_1/odom → robot_1/base_footprint`, robot_2도 동일하다. 각 로봇 odom 좌표를 그대로 같은 지도 좌표로 간주하지 않는다. 서로 다른 map을 쓰는 경우 보정된 map transform이 제공될 때까지 편대 시작을 차단한다.
 
-로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. endpoint, domain, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장하며 ID나 URL을 코드에 고정하지 않는다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
+로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
 
 | 입력/출력 | 목표 이름 (`{ns}`는 로봇 namespace) | 타입/처리 |
 |---|---|---|
