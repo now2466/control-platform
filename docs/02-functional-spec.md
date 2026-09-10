@@ -41,7 +41,7 @@ flowchart LR
   Adapter <--> G[각 로봇 정지 래치 / watchdog / 속도 중재]
 ```
 
-새 패키지 `pinky_control_center`와 `pinky_control_interfaces`, 프런트엔드 `control_frontend`를 저장소 루트에 추가한다. 기존 Flask 서버와 UI는 참고 자료로 유지한다. React·TypeScript·Vite, Python 3.12·FastAPI·rclpy·SQLite를 기준으로 하고 실제 설치 가능한 의존 버전은 T01에서 고정한다. 임의의 최신 버전을 문서에서 보장하지 않는다.
+`backend/`에 Python 패키지 `pinky_control_center`를 두고 `frontend/`에 React 앱을 둔다. ROS 인터페이스 패키지 `pinky_control_interfaces`는 `ros/` 아래에 T12에서 추가한다. 기존 Flask 서버와 UI는 참고 자료로 유지한다. React·TypeScript·Vite, Python 3.12·FastAPI·rclpy·SQLite를 기준으로 하고 실제 설치 가능한 의존 버전은 T01에서 고정한다. 임의의 최신 버전을 문서에서 보장하지 않는다.
 
 서버는 uvicorn worker 1개로 실행하며 rclpy executor는 별도 스레드에서 돈다. ROS 콜백은 불변 스냅샷 또는 크기가 제한된 큐로 API 루프와 소통한다. 인코딩과 파일 쓰기는 별도 작업자에게 넘긴다. 제어 큐는 최대 100개, 초과 시 503 반환; 정지 요청은 일반 큐를 우회해 최신 래치 요청으로 우선 처리한다. 영상 큐는 로봇당 1개, 오래된 프레임은 버린다.
 

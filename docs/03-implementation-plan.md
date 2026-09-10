@@ -2,7 +2,7 @@
 
 목표: 지도·2개 카메라 그리드·편대 임무·정지·알림·기록을 갖춘 웹 관제 플랫폼을 모의 실행에서 실물 2대 연동까지 구현한다.
 
-기준 문서: [요구사항](01-requirements.md), [기능 명세](02-functional-spec.md), [문서 안내](README.md). 구현 시 체크박스를 완료 여부로 관리한다. 문서 작성 시점에는 아래 작업을 실행하지 않았다.
+기준 문서: [요구사항](01-requirements.md), [기능 명세](02-functional-spec.md), [문서 안내](../README.md). 이 저장소는 독립 프로젝트이며 문서 작성 시점에는 아래 작업을 실행하지 않았다.
 
 ## 1. 구현 원칙과 기본 선택
 
@@ -17,14 +17,14 @@
 
 ## 2. 예정 파일 구조
 
-아래 경로는 `pinky_pro/` 기준이며 새로 만들 파일이다.
+아래 경로는 이 독립 저장소 루트 기준이며 새로 만들 파일이다.
 
 ```text
-pinky_control_interfaces/
+ros/pinky_control_interfaces/ (T12 예정)
   CMakeLists.txt, package.xml
   msg/ControlStatus.msg, msg/FollowStatus.msg
   srv/ControlCommand.srv, srv/FollowCommand.srv
-pinky_control_center/
+backend/
   package.xml, setup.py, setup.cfg, pyproject.toml, requirements.lock
   resource/pinky_control_center
   config/robots.mock.yaml, config/robots.ros.yaml, config/defaults.yaml
@@ -43,7 +43,7 @@ pinky_control_center/
   tests/test_safety.py, test_formation.py, test_missions.py
   tests/test_cameras.py, test_alerts.py, test_history.py
   tests/test_settings.py, test_ros_mapping.py, test_auth.py
-control_frontend/
+frontend/
   package.json, package-lock.json, tsconfig.json, vite.config.ts
   index.html, src/main.tsx, src/App.tsx, src/styles.css
   src/api/client.ts, src/api/types.ts, src/store.ts
@@ -59,7 +59,7 @@ control_frontend/
   tests/dashboard.spec.ts, safety.spec.ts, missions.spec.ts, replay.spec.ts
 deployment/
   control-center.service, reverse-proxy.conf, env.example
-docs/control-platform/
+docs/
   integration-report.md, acceptance-report.md, runbook.md
 ```
 
@@ -93,7 +93,7 @@ class RobotAdapter(Protocol):
 - [ ] mock profile은 정상, slave_offline, camera_stall, follow_lost, command_rejected를 제공한다. mock 전용 `/api/v1/mock/scenario`로 profile을 선택하고 ros 모드에는 이 경로를 등록하지 않는다.
 - [ ] main의 `--mode mock --host 127.0.0.1 --port 8081` 실행 계약을 구현한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_contracts.py -q`. ROS를 import할 수 없는 환경에서도 mock 기동, 두 robot ID와 구별되는 영상 확인. 이 단계는 모의 기반 완료이며 실물 연결 완료가 아니다.
+검증: `python -m pytest backend/tests/test_contracts.py -q`. ROS를 import할 수 없는 환경에서도 mock 기동, 두 robot ID와 구별되는 영상 확인. 이 단계는 모의 기반 완료이며 실물 연결 완료가 아니다.
 
 ### T02 — 저장·인증·상태 배포 (R03, R18, N04, N09)
 
@@ -104,7 +104,7 @@ class RobotAdapter(Protocol):
 - [ ] 상태 snapshot과 5Hz WS 배포, field별 freshness, 재접속 snapshot 복구를 구현한다.
 - [ ] 가짜 시계로 위치 1초·배터리 15초를 각각 넘겨 잘못된 정상 표시가 없는지 확인한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_auth.py pinky_control_center/tests/test_state.py -q`. 401/403, 중복 제어권 409, 상태 끊김·복구 통과.
+검증: `python -m pytest backend/tests/test_auth.py backend/tests/test_state.py -q`. 401/403, 중복 제어권 409, 상태 끊김·복구 통과.
 
 ### T03 — 지도·로봇 카드 (R01~R04, N01, N08)
 
@@ -126,7 +126,7 @@ class RobotAdapter(Protocol):
 - [ ] camera_stall로 한 영상만 중단하고 2초 경고·5초 가림 및 다른 영상 지속을 검증한다.
 - [ ] 언마운트/재연결 때 socket과 Blob URL을 해제하고 시청자 없는 중계 작업을 중단한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_cameras.py -q` 및 dashboard.spec.ts. 반복 확대/축소·재연결에서도 프레임 메모리가 쌓이지 않아야 한다.
+검증: `python -m pytest backend/tests/test_cameras.py -q` 및 frontend/tests/dashboard.spec.ts. 반복 확대/축소·재연결에서도 프레임 메모리가 쌓이지 않아야 한다.
 
 ### T05 — 명령·정지·수동 제어 (R09, R10, R18, N03, N06)
 
@@ -170,7 +170,7 @@ class RobotAdapter(Protocol):
 - [ ] stale 배터리로 저전력 판단 금지, 카메라 단절은 영상 의존 수동 제어만 차단, 추종/TF 이상은 편대 정지 정책을 검증한다.
 - [ ] 활성 경고를 확인 처리해도 원인이 남으면 ACTIVE를 유지한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_alerts.py -q`, 지도 레이어 선택·로봇 전환 화면 테스트.
+검증: `python -m pytest backend/tests/test_alerts.py -q`, 지도 레이어 선택·로봇 전환 화면 테스트.
 
 ### T09 — 설정·지도 관리·식별 장치 (R15~R17)
 
@@ -181,7 +181,7 @@ class RobotAdapter(Protocol):
 - [ ] 기존 SetLed/SetLamp 및 감정 서비스 정의를 읽어 장치별 입력 모델을 만들고 미지원 capabilities를 UI에 반영한다.
 - [ ] 이동 중 역할/지도/추종 제한 변경 거부와 모의 부분 적용 실패를 검증한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_settings.py -q` 및 설정 화면 입력 경계 테스트.
+검증: `python -m pytest backend/tests/test_settings.py -q` 및 frontend 설정 화면 입력 경계 테스트.
 
 ### T10 — 기록·이력·내보내기 (R13, N10, N11)
 
@@ -192,7 +192,7 @@ class RobotAdapter(Protocol):
 - [ ] UTC 저장·KST 표시, CSV 셀 수식 시작 문자 무해화, 24시간 export 제한을 검증한다.
 - [ ] 저장 실패는 경고·기록 장애 상태로 노출하고 정지 실행이 DB 실패에 막히지 않게 한다. 정지 감사 이벤트는 복구 후 보충한다.
 
-검증: `python -m pytest pinky_control_center/tests/test_history.py -q`. 임무 생성부터 취소까지 request_id로 결과를 추적할 수 있어야 한다.
+검증: `python -m pytest backend/tests/test_history.py -q`. 임무 생성부터 취소까지 request_id로 결과를 추적할 수 있어야 한다.
 
 ### T11 — 영상 기록·동기 재생 (R14, N10)
 
@@ -207,7 +207,7 @@ class RobotAdapter(Protocol):
 
 ### T12 — ROS 2 및 로봇 담당 인터페이스 연동 (전체 기능의 실물 기반)
 
-파일: pinky_control_interfaces 전체, adapters/ros.py, config/robots.ros.yaml, launch 파일, test_ros_mapping.py, integration-report.md.
+파일: ros/pinky_control_interfaces 전체, backend/pinky_control_center/adapters/ros.py, backend/config/robots.ros.yaml, backend/launch 파일, backend/tests/test_ros_mapping.py, docs/integration-report.md.
 
 - [ ] 현재 실행 중인 로봇별 topic/service/action 목록과 실제 타입·QoS, ROS_DOMAIN_ID, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 integration-report.md에 기록한다.
 - [ ] 새 interface 패키지를 빌드하고 ROS adapter에서 topic/action/service 및 feedback/결과를 연결한다.
