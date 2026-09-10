@@ -7,7 +7,7 @@
 ## 1. 구현 원칙과 기본 선택
 
 - Python 3.12, Ubuntu 24.04, ROS 2 Jazzy를 ROS 실행 기준으로 한다.
-- React/TypeScript/Vite + FastAPI/rclpy + SQLite를 사용한다. 실제 의존 버전은 T01에서 설치·빌드 확인 후 lock 파일에 고정한다.
+- React/TypeScript/Vite + FastAPI + SQLite를 사용한다. 실물 ROS는 로봇별 rosbridge websocket client(adapter)가 담당하며 실제 의존 버전은 T01에서 설치·빌드 확인 후 lock 파일에 고정한다.
 - 모든 제어는 서버에서 대상 ID, 권한, lease, 상태, 값 범위를 검증한다.
 - ROS 이름은 설정으로 매핑한다. mock은 ROS 없이 실행하며 ros 모드 장애를 mock으로 숨기지 않는다.
 - UI에 작업 중/완료/실패를 명시한다. 실제 수신 확인 없는 성공 표시는 금지한다.
@@ -63,7 +63,7 @@ docs/
   integration-report.md, acceptance-report.md, runbook.md
 ```
 
-各 Python 디렉터리의 `__init__.py`를 포함해 패키징한다. JS 테스트는 Vitest(단위), Playwright(화면), Python은 pytest. ROS 통합은 colcon test와 실제 두 namespace 그래프 확인을 병행한다.
+各 Python 디렉터리의 `__init__.py`를 포함해 패키징한다. JS 테스트는 Vitest(단위), Playwright(화면), Python은 pytest. ROS 통합은 rosbridge adapter contract test와 실제 두 domain endpoint/TF 그래프 확인을 병행한다.
 
 ## 3. 공통 어댑터 경계
 
@@ -87,7 +87,7 @@ class RobotAdapter(Protocol):
 
 파일: 패키지 선언/lock/config, models.py, adapters/base.py, adapters/mock.py, main.py, tests/test_contracts.py, 프런트엔드 기본 파일.
 
-- [ ] 의존성 설치 환경과 기존 변경을 확인하고 필요한 버전을 lock한다. ROS rclpy는 Jazzy 시스템 패키지를 사용하며 pip 대체 설치하지 않는다.
+- [ ] 의존성 설치 환경과 기존 변경을 확인하고 필요한 버전을 lock한다. 실물 ROS client는 T12의 rosbridge websocket adapter로 연결하며 browser direct rosbridge는 금지한다.
 - [ ] 기능 명세의 모델·enum·에러 스키마를 구현하고 ID 중복/NaN/범위 밖 입력 거부 테스트를 작성한다.
 - [ ] robot_1/robot_2, 공통 모의 지도, 서로 다른 로봇명·시각이 그려진 JPEG 영상을 생성하는 mock adapter를 만든다.
 - [ ] mock profile은 정상, slave_offline, camera_stall, follow_lost, command_rejected를 제공한다. mock 전용 `/api/v1/mock/scenario`로 profile을 선택하고 ros 모드에는 이 경로를 등록하지 않는다.
@@ -205,25 +205,22 @@ class RobotAdapter(Protocol):
 
 검증: test_history.py 및 `npx playwright test tests/replay.spec.ts`. 두 로봇 서로 다른 프레임 시각으로 정렬 정확성을 확인한다.
 
-### T12 — ROS 2 및 로봇 담당 인터페이스 연동 (전체 기능의 실물 기반)
+### T12 — 로봇별 rosbridge·ROS 2 인터페이스 연동 (전체 기능의 실물 기반)
 
 파일: ros/pinky_control_interfaces 전체, backend/pinky_control_center/adapters/ros.py, backend/config/robots.ros.yaml, backend/launch 파일, backend/tests/test_ros_mapping.py, docs/integration-report.md.
 
-- [ ] 현재 실행 중인 로봇별 topic/service/action 목록과 실제 타입·QoS, ROS_DOMAIN_ID, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 integration-report.md에 기록한다.
-- [ ] 새 interface 패키지를 빌드하고 ROS adapter에서 topic/action/service 및 feedback/결과를 연결한다.
+- [ ] 로봇별 rosbridge websocket endpoint, 서로 다른 ROS_DOMAIN_ID, topic/service/action 목록과 실제 타입·QoS, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 docs/integration-report.md에 기록한다.
+- [ ] `backend/config/robots.yaml`의 endpoint/domain/credentials/TLS/mapping으로 RobotAdapter를 두 개 구성하고 rosbridge JSON 요청·feedback·결과를 연결한다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
 - [ ] namespaced 토픽과 TF를 각기 검증한다. 기존 고정 odom/base_footprint는 로봇 담당과 수정·설정하고 TF 경로를 실측 확인한다.
 - [ ] 로봇 담당이 control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog을 구현한 결과를 연결한다. 미제공 기능은 UNSUPPORTED를 유지한다.
-- [ ] raw/compressed 영상과 battery 범위를 확인하고 설정에 반영한다. 두 로봇의 데이터와 제어 대상이 바뀌지 않는 contract test를 실행한다.
+- [ ] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다.
 - [ ] 무이동 상태에서 상태·영상·정지 응답을 먼저 시험한다. 현장 이동 시험 전에는 실물 속도 제어 enable을 열지 않는다.
 
 검증 (워크스페이스 `/home/yoon/pinky`):
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-select pinky_control_interfaces pinky_control_center
-source install/setup.bash
-colcon test --packages-select pinky_control_interfaces pinky_control_center
-colcon test-result --verbose
+python -m pytest backend/tests/test_ros_mapping.py -q
+python -m pytest backend/tests/test_rosbridge_adapter.py -q
 ```
 
 실물 전제 미충족 시 mock 완료와 ROS 구현 완료를 구별해 보고하고 integration-report.md에 정확한 누락 계약과 담당을 남긴다.

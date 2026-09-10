@@ -41,9 +41,9 @@ flowchart LR
   Adapter <--> G[각 로봇 정지 래치 / watchdog / 속도 중재]
 ```
 
-`backend/`에 Python 패키지 `pinky_control_center`를 두고 `frontend/`에 React 앱을 둔다. ROS 인터페이스 패키지 `pinky_control_interfaces`는 `ros/` 아래에 T12에서 추가한다. 기존 Flask 서버와 UI는 참고 자료로 유지한다. React·TypeScript·Vite, Python 3.12·FastAPI·rclpy·SQLite를 기준으로 하고 실제 설치 가능한 의존 버전은 T01에서 고정한다. 임의의 최신 버전을 문서에서 보장하지 않는다.
+`backend/`에 Python 패키지 `pinky_control_center`를 두고 `frontend/`에 React 앱을 둔다. ROS 인터페이스 패키지 `pinky_control_interfaces`는 `ros/` 아래에 T12에서 추가한다. 기존 Flask 서버와 UI는 참고 자료로 유지한다. React·TypeScript·Vite, Python 3.12·FastAPI·rosbridge websocket client·SQLite를 기준으로 하고 실제 의존 버전은 T01에서 고정한다. 임의의 최신 버전을 문서에서 보장하지 않는다.
 
-서버는 uvicorn worker 1개로 실행하며 rclpy executor는 별도 스레드에서 돈다. ROS 콜백은 불변 스냅샷 또는 크기가 제한된 큐로 API 루프와 소통한다. 인코딩과 파일 쓰기는 별도 작업자에게 넘긴다. 제어 큐는 최대 100개, 초과 시 503 반환; 정지 요청은 일반 큐를 우회해 최신 래치 요청으로 우선 처리한다. 영상 큐는 로봇당 1개, 오래된 프레임은 버린다.
+서버는 uvicorn worker 1개로 실행하며 로봇별 rosbridge websocket client가 각 ROS_DOMAIN_ID에 연결된다. 브라우저는 rosbridge에 직접 연결하지 않는다. 수신 콜백은 불변 스냅샷 또는 크기가 제한된 큐로 API 루프와 소통한다. 인코딩과 파일 쓰기는 별도 작업자에게 넘긴다. 제어 큐는 최대 100개, 초과 시 503 반환; 정지 요청은 일반 큐를 우회해 최신 래치 요청으로 우선 처리한다. 영상 큐는 로봇당 1개, 오래된 프레임은 버린다.
 
 `CONTROL_MODE=mock|ros`로 어댑터를 선택한다. mock에서는 ROS import 없이 API와 UI를 실행할 수 있어야 한다. ROS 모드에서 연결 실패를 mock 데이터로 숨기지 않는다.
 
@@ -166,14 +166,14 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 두 로봇이 공통 map에서 위치 추정하는 구성을 기본으로 한다. 목표 TF는 `map → robot_1/odom → robot_1/base_footprint`, robot_2도 동일하다. 각 로봇 odom 좌표를 그대로 같은 지도 좌표로 간주하지 않는다. 서로 다른 map을 쓰는 경우 보정된 map transform이 제공될 때까지 편대 시작을 차단한다.
 
-기본 같은 ROS_DOMAIN_ID 사용, 로봇별 namespace `/robot_1`, `/robot_2`. 실제 토픽, TF 프레임과 QoS를 `config/robots.yaml`에 저장한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 parameter/remap 변경을 검증한다.
+로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. endpoint, domain, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장하며 ID나 URL을 코드에 고정하지 않는다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
 
 | 입력/출력 | 목표 이름 (`{ns}`는 로봇 namespace) | 타입/처리 |
 |---|---|---|
 | 입력 | `/map`, `/tf`, `/tf_static` | OccupancyGrid, TFMessage. 지도 reliable/transient_local, 동적 TF 기본 tf2 정책 |
 | 입력 | `{ns}/odom`, `{ns}/scan` | Odometry, LaserScan. 센서 best_effort/volatile을 기본으로 발행자 호환 확인 |
 | 입력 | `{ns}/battery/percent`, `battery/voltage` | Float32. percent 값 범위를 실측해 0~100으로 정규화 |
-| 입력 | `{ns}/camera/image_raw` 또는 설정한 compressed 토픽 | Image/CompressedImage → JPEG. raw/compressed 선택을 설정으로 고정 |
+| 입력 | 설정한 compressed image 토픽 | rosbridge JSON/base64 CompressedImage를 JPEG로 변환. quality/throttle/fragment를 설정하며 별도 binary gateway는 옵션이다. |
 | 입력 | `{ns}/plan`, `local_costmap/costmap`, `global_costmap/costmap` | Path 및 실제 발행 타입에 맞춘 OccupancyGrid/Costmap 어댑터 |
 | 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 자체 goal handle 추적·취소·결과 확인 |
 | 제어 | `{ns}/initialpose` | PoseWithCovarianceStamped, 정지 시 허용 |
