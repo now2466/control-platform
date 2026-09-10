@@ -1,0 +1,257 @@
+# 기능·인터페이스 명세서
+
+관련 기준: [요구사항 정의서](01-requirements.md). 본 문서의 이름과 수치는 새 구현의 계약이다. 기존 ROS 코드가 이미 제공한다고 가정하지 않는다.
+
+## 1. 화면과 상호작용
+
+```text
+┌ 연결 상태 / LIVE·MOCK·REPLAY / 로그인 사용자 / 제어권 / 전체 긴급정지 ┐
+├─────────────────────────────────────┬─────────────────────┤
+│ 공통 지도: 두 로봇·경로·목표·궤적    │ robot_1 상태 카드   │
+│ 줌 / 전체 보기 / 로봇 따라보기       │ robot_2 상태 카드   │
+│ 지도·라이다·costmap 레이어 선택      │ 편대 간격·상태      │
+│                                     │ 임무 / 추종 제어    │
+├──────────────────┬──────────────────┤ 개별 정지           │
+│ 마스터 카메라     │ 슬레이브 카메라  │ 수동 조작           │
+│ 이름·FPS·신선도   │ 이름·FPS·신선도  │                     │
+├──────────────────┴──────────────────┴─────────────────────┤
+│ 최신 경고 / 이벤트 타임라인 / 이력·재생·설정으로 이동      │
+└───────────────────────────────────────────────────────────┘
+```
+
+헤더는 고정한다. 본문 좌측 72%, 우측 28%; 지도 높이 기본 360px, 영상은 16:9. 작은 화면에서는 스크롤을 허용하며 지도 다음에 영상, 다음에 상세 패널을 배치한다. 화면에 맞추려고 지도를 읽기 어려울 만큼 축소하지 않는다.
+
+- 지도 로봇 클릭과 영상 카드 선택은 같은 선택 상태를 공유한다. 마스터 청색, 슬레이브 주황색이며 역할 텍스트를 함께 표시한다.
+- 지도 클릭으로 목표 위치, 드래그로 방향을 정하고 미리보기 후 `임무 시작`을 누른다. 슬레이브 선택 상태라도 편대 임무 목표의 대상이 마스터임을 명시한다.
+- 지도 셀 원점의 위치·회전을 적용해 world↔canvas 변환을 수행한다. 화면 y축 반전과 줌/팬의 역변환을 포함한다. 점유/미상 셀은 기본 목표 지정 불가, 로봇 footprint 통과 가능성은 Nav2 결과로 판정한다.
+- TF가 없으면 마지막 위치를 회색으로 남기고 경과 시간을 표시한다. TF 없는 두 위치로 상대 거리를 계산하지 않는다.
+- 영상은 로봇별 독립 로딩·재연결. 2초간 새 프레임이 없으면 영상 위 `영상 지연/끊김` 오버레이, 5초 후 마지막 영상을 가린다. 다른 로봇 영상으로 대체하지 않는다.
+- 확대 보기에도 선택 로봇 이름과 긴급정지 접근성을 유지한다. 재생 화면에서는 `실시간으로 돌아가기`를 제공한다. 재생 중 긴급정지는 별도 LIVE 대상 영역에서만 가능하고 재생 시간축 명령은 전송하지 않는다.
+- 설정과 로그는 별도 화면으로 제공하되 헤더 긴급정지는 유지한다.
+
+## 2. 구조와 실행 방식
+
+```mermaid
+flowchart LR
+  UI[React 관제 화면] <-->|REST / 상태 WS / 프레임 WS| API[FastAPI 관제 서버]
+  API --> DB[(SQLite / 녹화 파일)]
+  API <--> Adapter[RobotAdapter: Mock 또는 ROS]
+  Adapter <--> M[마스터 Nav2 / 상태 / 카메라]
+  Adapter <--> S[슬레이브 추종 / 상태 / 카메라]
+  Adapter <--> G[각 로봇 정지 래치 / watchdog / 속도 중재]
+```
+
+새 패키지 `pinky_control_center`와 `pinky_control_interfaces`, 프런트엔드 `control_frontend`를 저장소 루트에 추가한다. 기존 Flask 서버와 UI는 참고 자료로 유지한다. React·TypeScript·Vite, Python 3.12·FastAPI·rclpy·SQLite를 기준으로 하고 실제 설치 가능한 의존 버전은 T01에서 고정한다. 임의의 최신 버전을 문서에서 보장하지 않는다.
+
+서버는 uvicorn worker 1개로 실행하며 rclpy executor는 별도 스레드에서 돈다. ROS 콜백은 불변 스냅샷 또는 크기가 제한된 큐로 API 루프와 소통한다. 인코딩과 파일 쓰기는 별도 작업자에게 넘긴다. 제어 큐는 최대 100개, 초과 시 503 반환; 정지 요청은 일반 큐를 우회해 최신 래치 요청으로 우선 처리한다. 영상 큐는 로봇당 1개, 오래된 프레임은 버린다.
+
+`CONTROL_MODE=mock|ros`로 어댑터를 선택한다. mock에서는 ROS import 없이 API와 UI를 실행할 수 있어야 한다. ROS 모드에서 연결 실패를 mock 데이터로 숨기지 않는다.
+
+## 3. 데이터 계약
+
+모든 REST 경로는 `/api/v1`, JSON 필드는 snake_case. 시간은 UTC ISO 8601, ID는 UUID 문자열(로봇 ID만 고정 문자열). 사용 불가 측정값은 null, 신선도는 `FRESH|STALE|UNKNOWN`. NaN/Infinity는 허용하지 않는다.
+
+```typescript
+type Pose = {x: number; y: number; yaw: number; frame_id: string};
+type RobotState = {
+  robot_id: string; name: string; role: 'MASTER'|'SLAVE';
+  connection: 'ONLINE'|'STALE'|'OFFLINE'; received_at: string|null;
+  pose: Pose|null; pose_freshness: 'FRESH'|'STALE'|'UNKNOWN';
+  linear_mps: number|null; angular_rps: number|null;
+  battery_percent: number|null; voltage_v: number|null;
+  battery_freshness: 'FRESH'|'STALE'|'UNKNOWN';
+  mode: 'IDLE'|'AUTO'|'FOLLOW'|'MANUAL'|'STOPPED'|'ERROR'|'UNKNOWN';
+  stop_latched: boolean|null;
+  capabilities: string[];
+  sensors: {name:string; state:'OK'|'STALE'|'ERROR'|'UNSUPPORTED'; received_at:string|null}[];
+};
+type FormationState = {
+  state: 'UNPAIRED'|'READY'|'FOLLOWING'|'PAUSED'|'LOST'|'REJOINING'|'STOPPED'|'ERROR'|'UNKNOWN';
+  master_id: string; slave_id: string; target_distance_m: number;
+  distance_m: number|null; gap_error_m: number|null; bearing_rad: number|null;
+  reason_code: string|null; received_at: string|null;
+};
+type Command = {
+  command_id: string; request_id: string; target: string;
+  state: 'QUEUED'|'ACCEPTED'|'RUNNING'|'SUCCEEDED'|'REJECTED'|'FAILED'|'TIMED_OUT'|'CANCELED';
+  reason_code: string|null; created_at: string; updated_at: string;
+};
+```
+
+`distance_m`는 공통 좌표에서 로봇 기준점 간 유클리드 거리, `gap_error_m=distance_m-target_distance_m`. `bearing_rad`는 마스터의 전방 기준으로 본 슬레이브 방향(-π~π). 물리적 충돌 여유 거리는 footprint/센서 기반 로봇 판단이며 기준점 간격과 혼동하지 않는다. 휘어진 경로에서 목표 간격 오차만으로 추종 실패를 단정하지 않고 추종 노드 상태도 함께 사용한다.
+
+`Mission`: mission_id, name, state, master_id, slave_id, map_id, waypoints(Pose[], 1~100), repeat_count(1~100), waypoint_index, lap_index, progress_distance_m(nullable), failure_code(nullable), created_at, updated_at.
+
+`Alert`: alert_id, code, robot_id(nullable), mission_id(nullable), severity(INFO/WARNING/CRITICAL), state(ACTIVE/RESOLVED), acknowledged_at(nullable), acknowledged_by(nullable), first_seen_at, last_seen_at, occurrences, message.
+
+## 4. 명령 및 상태 전이
+
+### 4.1 공통 명령
+
+제어 POST에는 `request_id`를 요구한다. 같은 사용자·request_id·동일 payload는 24시간 동안 기존 command_id를 반환한다. 같은 키에 다른 payload는 409. 응답 202는 접수이며 완료가 아니다. 결과는 `GET /commands/{id}`와 WS로 전달한다.
+
+일반 명령은 2초 내 로봇 수락이 없으면 TIMED_OUT. 이후 늦은 응답은 기록·상태 재조정에만 쓰며 새 명령처럼 재실행하지 않는다. Nav2 실행 제한은 경유점당 120초(설정 가능); 실패 시 다음 지점으로 자동 건너뛰지 않는다. 로봇 재접속/서버 재시작 시 미완료 명령을 자동 재전송하지 않는다.
+
+에러: `401 AUTH_REQUIRED`, `403 FORBIDDEN`, `409 CONTROL_CONFLICT|INVALID_STATE|STALE_VERSION`, `422 INVALID_VALUE`, `503 ROBOT_UNAVAILABLE|UNSUPPORTED|QUEUE_FULL`. 본문 `{error:{code,message,details},request_id}`. 알려진 로봇 ID 밖의 대상은 404. 로그에 사용자·대상·명령·결과를 남긴다.
+
+### 4.2 편대와 임무
+
+| 전이 | 조건/처리 |
+|---|---|
+| UNPAIRED → READY | pair; 두 로봇 연결·정지·같은 지도·유효한 TF·추종 준비 확인 |
+| READY/PAUSED → FOLLOWING | start/resume; 먼저 슬레이브가 FOLLOW 준비 응답, 다음 마스터 목표 전송. 한쪽 거절 시 양쪽 중단 |
+| FOLLOWING → PAUSED | pause; 마스터 goal 취소와 양쪽 정지 확인, 진행 지점 저장 |
+| FOLLOWING → LOST | 추종 노드 LOST 또는 간격 초과 지속; 임무 PAUSING, 양쪽 정지 요청 |
+| LOST → REJOINING → READY | 운영자 rejoin, 로봇 측 재합류 action 완료. 실패는 ERROR. 마스터는 정지 유지 |
+| 임의 상태 → STOPPED | 긴급정지; 양쪽 래치. 미확인 응답은 별도 target 상태에 보존 |
+| STOPPED → READY | 양쪽 건강·정지 확인, 명시적 래치 해제. 자동 임무 재개 없음 |
+| READY/PAUSED/STOPPED → UNPAIRED | unpair; 두 로봇 정지 확인 후 추종 해제 |
+
+임무: `DRAFT → READY → STARTING → RUNNING → SUCCEEDED`; 중간에 `PAUSING → PAUSED → STARTING`, `CANCELING → CANCELED`, 또는 `FAILED`. 시작 전 pair READY와 capabilities 검증. 마지막 마스터 goal 성공 후 슬레이브가 목표 간격 내 정지한 것을 확인해야 전체 성공이다. 10초 내 슬레이브 완료가 없으면 PAUSED 및 경고. 순찰은 지점 성공 후 다음 지점, 끝나면 회차 증가. 서버 재시작 시 진행 중 임무는 PAUSED, 명령 상태는 복구 필요 사유로 종료 처리한다.
+
+### 4.3 정지·수동 조작
+
+긴급정지는 UI 추가 확인창 없이 전송한다. 전체 응답은 로봇별 `REQUESTED|ACKNOWLEDGED|CONFIRMED|UNCONFIRMED`를 갖는다. CONFIRMED는 로봇 stop_latched=true와 신선한 odom에서 |v|<0.01m/s, |ω|<0.02rad/s가 0.5초 지속된 경우다. 이는 소프트웨어 관측 정지이며 물리 안전 인증이 아니다. 2초 무응답 시 UNCONFIRMED 경고를 유지한다.
+
+편대 운용 중 한 로봇 개별 정지는 해당 로봇을 즉시 정지시키고 편대 임무를 일시정지하며 동료에도 보호 정지를 요청한다. 정지 해제는 정지와 별도 명령이다. 정지 해제 자체가 주행을 시작하지 않는다.
+
+로봇 최종 출력은 `정지 래치 > watchdog > 유효한 수동 제어 > 활성 자율/추종` 우선순위로 중재한다. Nav2·추종·수동 제어가 최종 cmd_vel에 동시에 발행하지 않도록 로봇 담당이 remap한다. 기존 cmd_vel에 0을 한 번 발행하는 방식으로 대체하지 않는다.
+
+제어권 lease는 3초, UI는 1초마다 갱신. 수동 패킷은 10Hz, 로봇의 수동 명령 만료는 300ms. 전체 원격 운용 heartbeat 만료는 1초이며 로봇 측에서 정지 래치한다. 브라우저 제어권 소실 시 서버는 편대를 정지시키고, 서버 자체 단절은 로봇 watchdog이 처리한다. 수동 제어 진입은 임무 PAUSED, 양쪽 정지 확인, 선택 로봇 모드 전환 응답 후 허용한다. 종료 시 IDLE이며 자동 추종 복귀 없음.
+
+## 5. REST·실시간 API
+
+| Method/경로 | 입력 | 출력/동작 |
+|---|---|---|
+| POST `/session` | username,password | HttpOnly SameSite 쿠키, 사용자·역할. TLS 운영 배포에서는 Secure |
+| GET/DELETE `/session` | 없음 | 현재 사용자 / 로그아웃·lease 반납 |
+| GET `/state` | 없음 | robots[],formation,active_mission,active_alerts[],mode,seq,server_time |
+| POST `/control-lease` | request_id | lease_id,expires_at; 충돌은 409 |
+| PATCH/DELETE `/control-lease/{id}` | request_id | 갱신/반납; 소유자만 |
+| GET `/robots` | 없음 | 로봇 설정·capabilities 목록 |
+| POST `/robots/{id}/initial-pose` | request_id,pose,covariance(36개) | 정지 상태에서 command |
+| POST `/missions` | request_id,name,map_id,waypoints,repeat_count | DRAFT mission |
+| GET `/missions` | cursor,limit(최대100),state,from,to | items,next_cursor |
+| GET `/missions/{id}` | 없음 | Mission |
+| PATCH `/missions/{id}` | request_id,version,name,waypoints,repeat_count | DRAFT/READY만 수정 |
+| POST `/missions/{id}/actions` | request_id,action(validate/start/pause/resume/cancel) | command |
+| POST `/formation/actions` | request_id,action(pair/start/pause/unpair/rejoin),master_id,slave_id | command; 단독 start는 추종 준비만 수행, 마스터 주행은 mission start |
+| POST `/stop` | request_id,target(all/robot_1/robot_2) | command와 targets별 정지 확인 상태; lease 없이 운영자 이상 허용 |
+| POST `/stop/reset` | request_id,target | 정지 래치 해제 command; lease 필요 |
+| POST `/robots/{id}/mode` | request_id,mode(IDLE/MANUAL) | command |
+| GET `/commands/{id}` | 없음 | Command, targets(전체 정지일 때) |
+| GET `/maps` | 없음 | map_id,name,version 목록 |
+| GET `/maps/{id}` | 없음 | frame_id,resolution,width,height,origin,version,data_url |
+| GET `/maps/{id}/data` | version | PNG: free=254,occupied=0,unknown=205; ETag 캐시 |
+| POST `/maps/actions` | request_id,action(select/save/reset),map_id 또는 name | 정지 상태 검사, command; reset에 confirm=true |
+| GET `/alerts` | state,severity,robot_id,cursor,limit | items,next_cursor |
+| POST `/alerts/{id}/ack` | request_id | 확인자/확인시각; 원인 해소 아님 |
+| GET `/events` | robot_id,mission_id,from,to,cursor,limit | items,next_cursor |
+| GET `/events/export` | 동일 필터,format(csv/json) | 다운로드; 최대 24시간 단위 |
+| GET/PUT `/settings` | PUT:request_id,version,values | 설정 및 version; 관리자만 수정 |
+| POST `/robots/{id}/accessories` | request_id,device(led/lamp/emotion),values | 장치별 스키마 검증 후 command |
+| POST `/recordings` | request_id,mission_id,enabled | 기록 시작/중지 상태 |
+| GET `/recordings/{mission_id}/timeline` | from,to | 위치·상태·이벤트·영상 구간 목록 |
+| GET `/recordings/{mission_id}/frames/{robot_id}/{frame_id}` | 없음 | 인증된 JPEG 파일, 없으면 404 |
+
+PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 적용 실패 시 활성 버전은 이전 값을 유지하고 실패 결과를 반환한다. 편대 양쪽에 영향을 주는 변경은 정지 상태에서만 수행하며 한쪽만 적용되면 편대 시작을 차단하고 기존 값 복원을 시도한다.
+
+상태 WS `/ws/state`: `{type,seq,server_time,payload}`. type은 snapshot/robot_state/formation/mission/command/alert/camera_status. 최초 snapshot, 이후 상태 5Hz와 이벤트 즉시 전송. 클라이언트 sequence 누락 시 GET state 재동기화. 느린 클라이언트 큐 100개 초과 시 연결 종료 후 snapshot으로 복구, 명령 결과는 DB로 조회 가능.
+
+수동 WS `/ws/teleop`: `{lease_id,robot_id,seq,linear_mps,angular_rps}`. mode·lease·증가 seq·상한 검증, 오래된 패킷 거부. 전송 timestamp 대신 서버 수신 monotonic 시간을 watchdog 기준으로 사용한다. 연결 해제 시 즉시 중단.
+
+영상 WS `/ws/cameras/{robot_id}`: 메시지 하나는 `4-byte big-endian 메타데이터 길이 + UTF-8 JSON + JPEG bytes`. 메타데이터는 `{frame_id,captured_at,received_at,width,height}`. 프런트엔드는 최신 프레임만 렌더링하고 기존 Blob URL 해제. 저화질 320×240/5FPS, 기본 640×480/10FPS, 고화질 1280×720/15FPS 요청을 query quality로 받되 원본보다 업스케일하지 않는다. 실제 달성 FPS와 촬영시각 유효성을 표시한다. reconnect backoff는 1/2/4/8초, 최대 8초.
+
+## 6. ROS 연동 계약
+
+두 로봇이 공통 map에서 위치 추정하는 구성을 기본으로 한다. 목표 TF는 `map → robot_1/odom → robot_1/base_footprint`, robot_2도 동일하다. 각 로봇 odom 좌표를 그대로 같은 지도 좌표로 간주하지 않는다. 서로 다른 map을 쓰는 경우 보정된 map transform이 제공될 때까지 편대 시작을 차단한다.
+
+기본 같은 ROS_DOMAIN_ID 사용, 로봇별 namespace `/robot_1`, `/robot_2`. 실제 토픽, TF 프레임과 QoS를 `config/robots.yaml`에 저장한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 parameter/remap 변경을 검증한다.
+
+| 입력/출력 | 목표 이름 (`{ns}`는 로봇 namespace) | 타입/처리 |
+|---|---|---|
+| 입력 | `/map`, `/tf`, `/tf_static` | OccupancyGrid, TFMessage. 지도 reliable/transient_local, 동적 TF 기본 tf2 정책 |
+| 입력 | `{ns}/odom`, `{ns}/scan` | Odometry, LaserScan. 센서 best_effort/volatile을 기본으로 발행자 호환 확인 |
+| 입력 | `{ns}/battery/percent`, `battery/voltage` | Float32. percent 값 범위를 실측해 0~100으로 정규화 |
+| 입력 | `{ns}/camera/image_raw` 또는 설정한 compressed 토픽 | Image/CompressedImage → JPEG. raw/compressed 선택을 설정으로 고정 |
+| 입력 | `{ns}/plan`, `local_costmap/costmap`, `global_costmap/costmap` | Path 및 실제 발행 타입에 맞춘 OccupancyGrid/Costmap 어댑터 |
+| 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 자체 goal handle 추적·취소·결과 확인 |
+| 제어 | `{ns}/initialpose` | PoseWithCovarianceStamped, 정지 시 허용 |
+| 제어 | `{ns}/set_led`, `{ns}/set_lamp` | 기존 pinky_interfaces 서비스 정의를 읽고 필드 매핑 |
+| 신규 입력 | `{ns}/control/status` | 아래 ControlStatus, 10Hz heartbeat |
+| 신규 제어 | `{ns}/control/command` | 아래 ControlCommand service, reliable, 2초 수락 제한 |
+| 신규 입력 | `{slave_ns}/follow/status` | 아래 FollowStatus, 5Hz |
+| 신규 제어 | `{slave_ns}/follow/command` | 아래 FollowCommand service; 장기 완료는 status command_id로 상관 |
+| 신규 출력 | `{ns}/control/manual_velocity` | TwistStamped, 10Hz. 최종 cmd_vel에 직접 발행 금지 |
+| 신규 출력 | `{ns}/control/heartbeat` | std_msgs/UInt64, 10Hz 증가 counter; 수신 간격으로 watchdog 판단 |
+
+신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
+
+```text
+# msg/ControlStatus.msg
+builtin_interfaces/Time stamp
+string robot_id
+string mode
+bool stop_latched
+string active_command_id
+string command_state
+string reason_code
+string[] capabilities
+
+# srv/ControlCommand.srv
+string command_id
+string operation
+string parameters_json
+---
+bool accepted
+string reason_code
+
+# msg/FollowStatus.msg
+builtin_interfaces/Time stamp
+string command_id
+string state
+string reason_code
+float64 distance_m
+float64 gap_error_m
+bool measurement_valid
+
+# srv/FollowCommand.srv
+string command_id
+string operation
+string master_id
+float64 target_distance_m
+---
+bool accepted
+string reason_code
+```
+
+ControlCommand operation은 stop/reset_stop/set_mode/apply_settings만 허용하고 parameters_json은 operation별 스키마 검증한다. set_mode는 mode, apply_settings는 version/values, stop/reset_stop은 빈 객체. FollowCommand operation은 pair/start/pause/unpair/rejoin. 서비스 accepted는 수락일 뿐이며 ControlStatus/FollowStatus가 완료를 확인한다. 거리 미측정은 measurement_valid=false로 제공한다. 양쪽 서버는 command_id 중복을 실행하지 않는다.
+
+필수 노드 감시는 ROS graph 존재 확인과 control heartbeat를 나란히 제공한다. 그래프에 노드가 존재한다고 정상 실행으로 판정하지 않는다. 센서 stale도 분리한다. 센서 시간/수신 시각/monotonic watchdog 시간을 혼합하지 않는다. 시뮬레이션 ROS time 정지는 데이터 stale로 표시하고 watchdog은 wall monotonic으로 유지한다.
+
+## 7. 초기 설정·경고 정책
+
+| 설정 | 기본값 | 검증/동작 |
+|---|---|---|
+| target_distance_m | 0.8 | 0.5~2.0; 로봇 footprint 시험 후 조정 |
+| gap_tolerance_m | 0.2 | 0.05~0.5 |
+| separation_limit_m | 1.5 | target+tolerance보다 큼; 2초 초과면 LOST·편대 정지 |
+| close_limit_m | 0.35 | target-tolerance보다 작음; 0.3초 미만 간격 지속 시 정지 요청 |
+| max_linear_mps / max_angular_rps | 0.15 / 0.5 | 하드웨어에서 제공한 상한 이하; 실물 상한 미확인이면 이동 제어 비활성 |
+| battery_warning_percent | 20 | 10초 지속 경고, 25 초과 10초 시 해소 |
+| battery_critical_percent | 10 | 10초 지속 편대 정지 요청; stale 값으로 판정 금지 |
+| heartbeat_stale/offline_s | 1 / 3 | stale면 새 주행 금지·정지 요청, offline 경고 |
+
+추종 ERROR, TF stale, 필수 주행 센서 ERROR는 편대 정지 정책. 카메라 끊김은 WARNING이며 영상만 끊겼다고 로봇을 무조건 멈추지 않는다. 영상 의존 수동 운용에서는 끊긴 로봇 수동 입력을 차단한다. 장애물 알림은 로봇 측 차단 상태/이유를 표시하며 관제 라이다 점 하나로 충돌 판단하지 않는다.
+
+동일 code+robot_id의 활성 알림은 하나로 유지하며 occurrences와 last_seen 갱신. 확인(ACK)은 소리만 억제하고 원인 해소를 대신하지 않는다. 일반 센서 경고는 정상 3초 유지 시 해소. 알림 팝업은 긴급정지 버튼을 가리지 않는다.
+
+## 8. 저장·재생·운영
+
+SQLite WAL, schema migration version을 둔다. 테이블: users(id,username,password_hash,role), robots(id,config_json), missions(id,state,payload_json,created_at,updated_at), commands(id,request_id,user_id,payload_hash,target,state,payload_json,result_json,created_at,updated_at), events(id,robot_id,mission_id,kind,payload_json,recorded_at), alerts(id,code,robot_id,state,payload_json), telemetry(id,robot_id,mission_id,source_at,received_at,payload_json), settings(version,values_json,applied_at), frames(id,mission_id,robot_id,captured_at,received_at,path). commands에 (user_id,request_id) unique, 조회 필터의 mission_id/robot_id/time index를 만든다.
+
+위치·편대 telemetry는 5Hz, 배터리는 수신 시, 이벤트·명령은 전량 저장한다. 영상 기록은 기본 OFF, 임무에 연결해 켜면 로봇당 최대 5FPS JPEG 파일과 시각 인덱스를 기록한다. 실시간 10FPS와 녹화 5FPS는 별개다. 쓰기는 임시 파일 후 원자 rename, 완료 파일만 DB 등록한다. 파일 경로는 서버가 생성하고 임의 사용자 경로를 받지 않는다.
+
+재생은 관제 received_at을 공통 시간축으로 사용하고 source time이 동기화되었을 때 촬영시각을 보조 표시한다. 선택 시각 이하 가장 가까운 프레임을 사용하되 500ms 넘게 차이 나면 영상 공백, 위치 1초 이상 간격은 보간하지 않는다. 영상이 없는 임무도 궤적·이벤트 재생 가능하다. 기록 중단·보존 만료는 시간축에 표시한다.
+
+운영 환경은 정적 UI와 API를 같은 출처의 TLS 리버스 프록시로 노출하고 ROS DDS는 내부 LAN으로 제한한다. 제어 POST는 CSRF 토큰과 Origin 검증, WS는 세션·Origin 검증. 로그인은 사용자/IP별 5회/분 제한. 비밀번호는 검증된 해시 라이브러리 사용, 기본 하드코딩 계정은 금지한다. 시스템 서비스 재시작은 상태 조회를 복구할 뿐 주행을 재개하지 않는다.
