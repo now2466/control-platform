@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import json
 import hashlib
 import hmac
 from importlib import resources
 import secrets
 import sqlite3
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -56,6 +58,7 @@ class Storage:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(database_path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self._command_lock = threading.RLock()
         self.connection.execute("PRAGMA journal_mode=WAL")
         self.connection.execute("PRAGMA foreign_keys=ON")
         self._migrate()
@@ -68,6 +71,60 @@ class Storage:
             if "session_token_hash" not in columns:
                 self.connection.execute("ALTER TABLE control_leases ADD COLUMN session_token_hash TEXT NOT NULL DEFAULT 'legacy'")
             self.connection.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(1, ?)", (_timestamp(self.clock()),))
+            applied = {row["version"] for row in self.connection.execute("SELECT version FROM schema_migrations")}
+            if 2 not in applied:
+                sql = resources.files("pinky_control_center").joinpath("migrations", "002_commands.sql").read_text(encoding="utf-8")
+                self.connection.executescript(sql)
+                self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(2, ?)", (_timestamp(self.clock()),))
+            if 3 not in applied:
+                sql = resources.files("pinky_control_center").joinpath("migrations", "003_command_idempotency_window.sql").read_text(encoding="utf-8")
+                self.connection.executescript(sql)
+                self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(3, ?)", (_timestamp(self.clock()),))
+
+    def create_command(self, user: UserInfo, request_id: UUID, target: str, payload: dict[str, object]) -> dict[str, object]:
+        payload_text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        payload_hash = hashlib.sha256(payload_text.encode()).hexdigest()
+        # The RLock protects this shared sqlite connection in a threaded ASGI worker;
+        # BEGIN IMMEDIATE provides the corresponding database write claim.
+        with self._command_lock:
+            try:
+                self.connection.execute("BEGIN IMMEDIATE")
+                now_value = self.clock()
+                cutoff = _timestamp(now_value - timedelta(hours=24))
+                row = self.connection.execute("SELECT id,payload_hash,target,state,result_json FROM commands WHERE user_id=? AND request_id=? AND created_at > ? ORDER BY created_at DESC LIMIT 1", (str(user.user_id), str(request_id), cutoff)).fetchone()
+                if row:
+                    if row["payload_hash"] != payload_hash:
+                        raise ValueError("REQUEST_ID_CONFLICT")
+                    self.connection.commit()
+                    return {
+                        "command_id": row["id"], "target": row["target"], "state": row["state"],
+                        "result": json.loads(row["result_json"] or "{}"),
+                    }
+                command_id = str(uuid4())
+                now = _timestamp(now_value)
+                self.connection.execute("INSERT INTO commands(id,user_id,request_id,created_at,payload_hash,target,state,result_json,updated_at) VALUES(?,?,?,?,?,?,?,?,?)", (command_id, str(user.user_id), str(request_id), now, payload_hash, target, "ACCEPTED", "{}", now))
+                self.connection.commit()
+                return {"command_id": command_id, "target": target, "state": "ACCEPTED", "result": {}}
+            except Exception:
+                self.connection.rollback()
+                raise
+
+    def command(self, command_id: str, user: UserInfo) -> dict[str, object] | None:
+        row = self.connection.execute("SELECT id,target,state,result_json FROM commands WHERE id=? AND user_id=?", (command_id, str(user.user_id))).fetchone()
+        if row is None: return None
+        result = {"command_id": row["id"], "target": row["target"], "state": row["state"]}
+        result.update(json.loads(row["result_json"] or "{}")); return result
+
+    def set_command_result(self, command_id: str, result: dict[str, object]) -> None:
+        with self.connection: self.connection.execute("UPDATE commands SET result_json=?, updated_at=? WHERE id=?", (json.dumps(result), _timestamp(self.clock()), command_id))
+
+    def set_command_state(self, command_id: str, state: str) -> None:
+        with self.connection:
+            self.connection.execute("UPDATE commands SET state=?, updated_at=? WHERE id=?", (state, _timestamp(self.clock()), command_id))
+
+    def delete_command(self, command_id: str) -> None:
+        with self.connection:
+            self.connection.execute("DELETE FROM commands WHERE id=?", (command_id,))
 
     def close(self) -> None:
         self.connection.close()
@@ -161,6 +218,23 @@ class Storage:
         if result.rowcount != 1:
             raise LeaseNotFound("control lease is missing or owned by another user")
         self.lease_end_hook("LEASE_RELEASED")
+
+    def owns_lease(self, lease_id: UUID, user: UserInfo, session_token: str) -> bool:
+        row = self.connection.execute("SELECT user_id,session_token_hash,expires_at FROM control_leases WHERE id=?", (str(lease_id),)).fetchone()
+        return bool(row and row["user_id"] == str(user.user_id) and row["session_token_hash"] == self.token_hash(session_token) and _parse_timestamp(row["expires_at"]) > self.clock())
+
+    def expire_security(self) -> list[str]:
+        """Remove elapsed leases/sessions and report causes once to the runtime watchdog."""
+        now = _timestamp(self.clock())
+        with self.connection:
+            expired_leases = self.connection.execute("DELETE FROM control_leases WHERE expires_at <= ?", (now,)).rowcount
+            expired_sessions = self.connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,)).rowcount
+        reasons: list[str] = []
+        if expired_leases:
+            reasons.append("LEASE_EXPIRED")
+        if expired_sessions:
+            reasons.append("SESSION_EXPIRED")
+        return reasons
 
 
 class LeaseConflict(Exception):

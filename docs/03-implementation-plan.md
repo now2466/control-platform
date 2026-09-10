@@ -132,12 +132,12 @@ class RobotAdapter(Protocol):
 
 파일: command_service.py, safety_service.py, api/control.py, StopBar.tsx, TeleopPanel.tsx, test_commands.py, test_safety.py, safety.spec.ts.
 
-- [ ] idempotency와 202 접수, 수락/완료 상태, timeout·늦은 결과를 구현한다.
-- [ ] 전체/개별 정지의 로봇별 상태, 정지 래치 해제와 주행 재개의 분리를 구현한다.
-- [ ] 제어권·수동 모드·10Hz 입력·포커스 상실·브라우저 끊김 처리를 구현한다. mock에서 로봇 watchdog을 재현한다.
-- [ ] 동일 request_id 2회 전송 시 execute 1회, 슬레이브 무응답 시 전체 정지 성공 미표시, lease 상실 시 양쪽 중단을 테스트한다.
+- [x] idempotency와 202 접수, 수락/완료 상태, timeout·늦은 결과를 구현한다.
+- [x] 전체/개별 정지의 로봇별 상태, 정지 래치 해제와 주행 재개의 분리를 구현한다.
+- [x] 제어권·수동 모드·10Hz 입력·포커스 상실·브라우저 끊김 처리를 구현한다. mock에서 로봇 watchdog을 재현한다.
+- [x] 동일 request_id 2회 전송 시 execute 1회, 슬레이브 무응답 시 전체 정지 성공 미표시, lease 상실 시 양쪽 중단을 테스트한다.
 
-검증: test_commands.py/test_safety.py 및 safety.spec.ts. 모의 정지 성공은 실물 안전 구현의 증거가 아니다.
+검증: backend tests 38개와 frontend tests 27개. 모의/runtime 정지 성공은 실물 safety wiring·ROS watchdog 구현의 증거가 아니며 T12에서 별도 검증한다.
 
 ### T06 — 편대·단일 임무 (R04, R06, R08)
 

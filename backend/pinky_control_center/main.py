@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -19,8 +21,11 @@ from pinky_control_center.config import load_mock_config
 from pinky_control_center.models import MockScenario, MockScenarioRequest, UserInfo, UserRole
 from pinky_control_center.map_service import MapService
 from pinky_control_center.camera_service import CameraService
+from pinky_control_center.command_service import CommandService
+from pinky_control_center.teleop_service import TeleopService
+from pinky_control_center.safety_service import SafetyService
 from pinky_control_center.state_store import StateStore
-from pinky_control_center.storage import Storage
+from pinky_control_center.storage import Storage, utc_now
 
 
 def default_database_path() -> Path:
@@ -28,20 +33,33 @@ def default_database_path() -> Path:
     return state_home / "control-platform" / "control.db"
 
 
-def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173") -> FastAPI:
+def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", monotonic_clock=None, start_command_worker: bool = True, storage_clock=None) -> FastAPI:
     if mode != "mock":
         raise ValueError("ROS mode is not available in T01; start with --mode mock")
     adapter = MockRobotAdapter(config=load_mock_config(config_path))
     lease_events: list[str] = []
-    storage = Storage(database_path or default_database_path(), lease_end_hook=lease_events.append)
+    storage = Storage(database_path or default_database_path(), clock=storage_clock or utc_now, lease_end_hook=lease_events.append)
     state_store = StateStore(adapter.snapshot)
     map_service = MapService()
     camera_service = CameraService(adapter.frame)
+    command_service = CommandService(storage, adapter)
+    runtime_clock = monotonic_clock or time.monotonic
+    teleop_service = TeleopService(runtime_clock)
+    safety_service = SafetyService(runtime_clock)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await adapter.connect()
+        if start_command_worker:
+            await command_service.start()
+        watchdog_task = asyncio.create_task(watchdog())
         yield
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
+        await command_service.close()
         await adapter.close()
         await camera_service.close()
         storage.close()
@@ -50,12 +68,42 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.state.adapter = adapter
     app.state.mode = mode
     app.state.storage = storage
+    app.state.command_service = command_service
+    app.state.command_dispatcher = command_service
+    app.state.teleop_service = teleop_service
+    app.state.safety_service = safety_service
+    def refresh_stops() -> None:
+        for robot in state_store.snapshot().robots:
+            safety_service.observe(robot.robot_id, stop_latched=bool(robot.stop_latched), linear_mps=robot.linear_mps, angular_rps=robot.angular_rps, fresh=robot.pose_freshness.value == "FRESH")
+        command_service.refresh_stops(safety_service.states())
     app.state.allowed_origin = allowed_origin
     app.state.state_store = state_store
+
+    async def protective_stop(robot_id: str) -> None:
+        teleop_service.protective_stop(robot_id)
+        state_store.disconnect(robot_id)
+        await command_service.protective_stop(robot_id)
+
+    async def runtime_tick() -> None:
+        refresh_stops()
+        for robot_id in teleop_service.tick():
+            await protective_stop(robot_id)
+        if storage.expire_security():
+            # An expired control identity invalidates manual authority for both robots.
+            await protective_stop("robot_1")
+
+    async def watchdog() -> None:
+        while True:
+            await runtime_tick()
+            await asyncio.sleep(0.05)
+
+    app.state.runtime_tick = runtime_tick
+    app.state.protective_stop = protective_stop
     # T02 records lease end causes only. T05 connects this hook to the safety stop path.
     app.state.lease_events = lease_events
     app.include_router(session.router)
     app.include_router(control.router)
+    app.add_api_websocket_route("/ws/teleop", control.teleop)
     app.include_router(state.create_router(state_store))
     app.include_router(maps.create_router(map_service))
     app.include_router(cameras.create_router(camera_service))

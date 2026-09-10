@@ -13,16 +13,24 @@ class StateStore:
         self.snapshot_source = snapshot_source
         self.clock = clock or (lambda: datetime.now(UTC))
         self.sequence = 0
+        self.disconnected: set[str] = set()
+
+    def disconnect(self, robot_id: str) -> None:
+        self.disconnected.add(robot_id)
 
     def snapshot(self) -> StateSnapshot:
         now = self.clock()
         source = self.snapshot_source()
-        robots = [self._fresh_robot(robot, now) for robot in source.robots]
+        robots = [self._offline(robot) if robot.robot_id in self.disconnected else self._fresh_robot(robot, now) for robot in source.robots]
         formation = source.formation
         if any(not robot.tf_valid or robot.pose is None for robot in robots):
             formation = formation.model_copy(update={"distance_m": None, "gap_error_m": None, "bearing_rad": None})
         self.sequence += 1
         return source.model_copy(update={"robots": robots, "formation": formation, "seq": self.sequence, "server_time": now})
+
+    @staticmethod
+    def _offline(robot: RobotState) -> RobotState:
+        return robot.model_copy(update={"connection": Connection.OFFLINE, "pose_freshness": Freshness.UNKNOWN, "battery_freshness": Freshness.UNKNOWN, "tf_valid": False, "tf_reason_code": "SAFETY_DISCONNECTED"})
 
     @staticmethod
     def _fresh_robot(robot: RobotState, now: datetime) -> RobotState:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket
+from starlette.websockets import WebSocketDisconnect
 
-from pinky_control_center.auth import current_user, verify_mutation
+from pinky_control_center.auth import current_user, verify_mutation, websocket_user
 from pinky_control_center.models import ControlLease, LeaseRequest, UserInfo, UserRole
 from pinky_control_center.storage import LeaseConflict, LeaseNotFound
+from pinky_control_center.command_service import QueueFull
 
 router = APIRouter(prefix="/api/v1")
 
@@ -42,3 +45,104 @@ async def release(lease_id: str, request: Request, user: UserInfo = Depends(oper
     except (LeaseNotFound, ValueError) as error:
         raise HTTPException(status_code=409, detail="CONTROL_CONFLICT") from error
     return Response(status_code=204)
+
+
+@router.post("/stop", status_code=202)
+async def stop(payload: dict[str, object], request: Request, user: UserInfo = Depends(operator)) -> dict[str, object]:
+    try:
+        request_id, target = UUID(str(payload["request_id"])), str(payload["target"])
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=422, detail="INVALID_VALUE") from error
+    if target not in {"all", "robot_1", "robot_2"}:
+        raise HTTPException(status_code=404, detail="ROBOT_NOT_FOUND")
+    try:
+        result = request.app.state.command_dispatcher.submit(user, request_id, target, "stop", priority=True)
+        robot_ids = ["robot_1", "robot_2"] if target == "all" else [target]
+        request.app.state.safety_service.request(robot_ids)
+        result["targets"] = [{"robot_id": robot_id, "state": "REQUESTED"} for robot_id in robot_ids]
+        return result
+    except QueueFull as error:
+        raise HTTPException(status_code=503, detail="QUEUE_FULL") from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="REQUEST_ID_CONFLICT") from error
+
+
+@router.post("/stop/reset", status_code=202)
+async def reset_stop(payload: dict[str, object], request: Request, user: UserInfo = Depends(operator)) -> dict[str, object]:
+    try:
+        request_id, target, lease_id = UUID(str(payload["request_id"])), str(payload["target"]), UUID(str(payload["lease_id"]))
+        if target not in {"all", "robot_1", "robot_2"}:
+            raise ValueError
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=409, detail="CONTROL_CONFLICT") from error
+    try:
+        if not request.app.state.storage.owns_lease(lease_id, user, request.cookies.get("cc_session", "")):
+            raise PermissionError("CONTROL_CONFLICT")
+        return request.app.state.command_dispatcher.submit(user, request_id, target, "reset_stop")
+    except PermissionError as error:
+        raise HTTPException(status_code=409, detail="CONTROL_CONFLICT") from error
+    except QueueFull as error:
+        raise HTTPException(status_code=503, detail="QUEUE_FULL") from error
+
+
+@router.post("/robots/{robot_id}/mode", status_code=202)
+async def set_mode(robot_id: str, payload: dict[str, object], request: Request, user: UserInfo = Depends(operator)) -> dict[str, object]:
+    if robot_id not in {"robot_1", "robot_2"}:
+        raise HTTPException(status_code=404, detail="ROBOT_NOT_FOUND")
+    try:
+        request_id, mode = UUID(str(payload["request_id"])), str(payload["mode"])
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=422, detail="INVALID_VALUE") from error
+    if mode not in {"IDLE", "AUTO", "FOLLOW", "MANUAL", "STOPPED"}:
+        raise HTTPException(status_code=422, detail="INVALID_VALUE")
+    try:
+        return request.app.state.command_dispatcher.submit(user, request_id, robot_id, "set_mode", parameters={"mode": mode})
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail="REQUEST_ID_CONFLICT") from error
+    except QueueFull as error:
+        raise HTTPException(status_code=503, detail="QUEUE_FULL") from error
+
+
+@router.get("/commands/{command_id}")
+async def command(command_id: str, request: Request, user: UserInfo = Depends(current_user)) -> dict[str, object]:
+    result = request.app.state.storage.command(command_id, user)
+    if result is None:
+        raise HTTPException(status_code=404, detail="COMMAND_NOT_FOUND")
+    return result
+
+
+@router.websocket("/ws/teleop")
+async def teleop(websocket: WebSocket) -> None:
+    user = await websocket_user(websocket)
+    if user is None:
+        return
+    await websocket.accept()
+    last_seq = -1
+    while True:
+        try:
+            payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            await websocket.app.state.protective_stop("robot_1")
+            return
+        try:
+            lease_id = UUID(str(payload["lease_id"]))
+            robot_id, seq = str(payload["robot_id"]), int(payload["seq"])
+            linear, angular = float(payload["linear_mps"]), float(payload["angular_rps"])
+        except (KeyError, ValueError, TypeError):
+            await websocket.send_json({"type": "rejected", "reason_code": "INVALID_VALUE"})
+            continue
+        if robot_id not in {"robot_1", "robot_2"} or abs(linear) > 1 or abs(angular) > 2:
+            await websocket.send_json({"type": "rejected", "reason_code": "INVALID_VALUE"})
+        elif seq <= last_seq:
+            await websocket.send_json({"type": "rejected", "reason_code": "OUT_OF_ORDER"})
+        elif not websocket.app.state.storage.owns_lease(lease_id, user, websocket.cookies.get("cc_session", "")):
+            await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"})
+        else:
+            last_seq = seq
+            service = websocket.app.state.teleop_service
+            try:
+                service.enter(robot_id, lease_valid=True)
+            except PermissionError:
+                await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"}); continue
+            result = service.ingest(robot_id, seq, linear, angular)
+            await websocket.send_json({"type": result.lower(), "seq": seq})

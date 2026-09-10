@@ -2,7 +2,7 @@
 
 작성일: 2026-09-10 · 버전: 1.0 · 상태: 구현 기준안
 
-마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. 현재 T01 모의 실행 기반부터 T03 지도·로봇 카드까지 제공하며, 카메라 대시보드·실물 연동은 후속 작업이다.
+마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. 현재 T01~T05의 모의 실행 범위를 제공하며, 실물 연동은 후속 작업이다.
 
 ## 실행
 
@@ -39,7 +39,7 @@ mkdir -p ~/.local/state/control-platform
 | T02 | 저장·인증·상태 배포 | 완료 |
 | T03 | 지도·로봇 카드 | 완료 |
 | T04 | 카메라 그리드 | 완료 |
-| T05 | 정지·수동 조작·권한 | 미구현 |
+| T05 | 정지·수동 조작·권한 | 완료 |
 | T06 | 편대 상태 전이·안전 | 미구현 |
 | T07 | 임무·알림 | 미구현 |
 | T08 | 지도 센서 레이어 | 미구현 |
@@ -55,6 +55,8 @@ T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적
 새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. T04의 상세 RED/GREEN 증거는 `docs/tdd/T04-camera-grid.md`에 기록한다. 현재 확인된 genuine RED는 quality selector 부재 assertion이며, decoder 초기 import 실패와 구현 뒤 작성된 보조 테스트는 각각 setup/characterization evidence로 구분한다.
 
 T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
+
+T05 frontend 검증은 frontend Vitest 27개와 backend mock/runtime tests 38개를 통과했다. 정지·watchdog의 동작은 mock/runtime 검증 결과이며 실제 로봇 safety wiring과 ROS watchdog 시험은 T12에서 수행한다.
 
 실물 연결은 로봇별 rosbridge websocket을 사용한다. 배포 고정값은 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`이며 관제 UI/API에서 domain ID를 변경하지 않는다. backend의 RobotAdapter가 두 연결을 관리하고 bridge URL·인증/TLS·토픽 매핑만 설정으로 관리한다. 브라우저는 rosbridge에 직접 연결하지 않으며 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
 
