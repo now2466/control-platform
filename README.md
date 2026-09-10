@@ -38,7 +38,7 @@ mkdir -p ~/.local/state/control-platform
 | T01 | 계약·환경·모의 실행·기본 화면 | 완료 |
 | T02 | 저장·인증·상태 배포 | 완료 |
 | T03 | 지도·로봇 카드 | 완료 |
-| T04 | 카메라 그리드 | 미구현 |
+| T04 | 카메라 그리드 | 완료 |
 | T05 | 정지·수동 조작·권한 | 미구현 |
 | T06 | 편대 상태 전이·안전 | 미구현 |
 | T07 | 임무·알림 | 미구현 |
@@ -50,9 +50,13 @@ mkdir -p ~/.local/state/control-platform
 | T13 | 인증 강화·배포 | 미구현 |
 | T14 | 통합 인수·실물 검증 | 미구현 |
 
-T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. 카메라 스트리밍은 T04, 목표 명령과 편대 제어는 T06 이후 범위다.
+T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드는 완료했으며, 목표 명령과 편대 제어는 T06 이후 범위다. 현재 검증은 frontend 19 tests와 backend 21 tests를 통과했다.
+
+새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. T04의 상세 RED/GREEN 증거는 `docs/tdd/T04-camera-grid.md`에 기록한다. 현재 확인된 genuine RED는 quality selector 부재 assertion이며, decoder 초기 import 실패와 구현 뒤 작성된 보조 테스트는 각각 setup/characterization evidence로 구분한다.
 
 T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
+
+실물 연결은 로봇별 rosbridge websocket을 사용한다. 각 로봇은 서로 다른 `ROS_DOMAIN_ID`와 설정된 rosbridge endpoint를 가지며, backend의 RobotAdapter가 두 연결을 관리한다. 브라우저는 rosbridge에 직접 연결하지 않는다. endpoint, 인증/TLS, 토픽 매핑은 설정으로 관리하고 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
 
 ## 읽는 순서
 
@@ -71,7 +75,7 @@ P0/P1/P2는 개발 순서이다. P2도 최종 납품 범위에 포함한다. 모
 
 - 관제 PC 1대, 로봇 2대, 로컬 네트워크, 한국어 웹 UI를 기본으로 한다.
 - 불변 ID는 `robot_1`, `robot_2`, 역할은 각각 `MASTER`, `SLAVE`이다. 역할 변경은 둘 다 정지한 상태에서만 허용한다.
-- React + TypeScript 화면, FastAPI 서버, rclpy 연동, SQLite 기록, JPEG 프레임 스트림을 구현 기준으로 선택한다. 이는 새 플랫폼의 설계 결정이며 기존 프로젝트에 설치되어 있다는 뜻은 아니다.
+- React + TypeScript 화면, FastAPI 서버, 로봇별 rosbridge websocket adapter, SQLite 기록, JPEG 프레임 스트림을 구현 기준으로 선택한다. 이는 새 플랫폼의 설계 결정이며 기존 프로젝트에 설치되어 있다는 뜻은 아니다.
 - 실물 로봇의 토픽명·카메라 타입·TF·추종 제어 서비스는 현재 실행 환경에서 확인되지 않았다. 명세의 ROS 이름은 목표 계약이며 설정으로 매핑한다.
 - 실물 안전 제어를 맡는 로봇 측 정지 래치·명령 watchdog·속도 중재기는 로봇 담당과 공동 연동해야 한다. 해당 기능 없이 웹 정지 버튼만으로 실물 검증을 통과시킬 수 없다.
 - 시간·거리·속도 기준은 초기 시험값이다. 장비 성능을 확인한 수치가 아니며 하드웨어 허용 범위와 현장 시험으로 확정한다.

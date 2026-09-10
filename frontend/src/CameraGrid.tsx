@@ -1,0 +1,2 @@
+import CameraTile from './CameraTile'
+export default function CameraGrid({ robots }: { robots: Array<{ robot_id: string; name: string; role: string; connection: string }> }) { return <section className="camera-grid"><div className="section-title"><h2>카메라</h2><span>실시간 영상</span></div><div className="camera-columns">{[...robots].sort((a, b) => a.role === 'MASTER' ? -1 : b.role === 'MASTER' ? 1 : 0).map(robot => <CameraTile key={robot.robot_id} robot={robot} />)}</div></section> }

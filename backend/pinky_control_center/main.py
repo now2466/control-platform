@@ -13,11 +13,12 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pinky_control_center.adapters.mock import MockRobotAdapter
-from pinky_control_center.api import control, maps, session, state
+from pinky_control_center.api import cameras, control, maps, session, state
 from pinky_control_center.auth import current_user, verify_mutation
 from pinky_control_center.config import load_mock_config
 from pinky_control_center.models import MockScenario, MockScenarioRequest, UserInfo, UserRole
 from pinky_control_center.map_service import MapService
+from pinky_control_center.camera_service import CameraService
 from pinky_control_center.state_store import StateStore
 from pinky_control_center.storage import Storage
 
@@ -35,12 +36,14 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     storage = Storage(database_path or default_database_path(), lease_end_hook=lease_events.append)
     state_store = StateStore(adapter.snapshot)
     map_service = MapService()
+    camera_service = CameraService(adapter.frame)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await adapter.connect()
         yield
         await adapter.close()
+        await camera_service.close()
         storage.close()
 
     app = FastAPI(title="Pinky Control Center", version="0.1.0", lifespan=lifespan)
@@ -55,6 +58,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.include_router(control.router)
     app.include_router(state.create_router(state_store))
     app.include_router(maps.create_router(map_service))
+    app.include_router(cameras.create_router(camera_service))
 
     @app.exception_handler(StarletteHTTPException)
     async def api_error(_request: Request, error: StarletteHTTPException) -> JSONResponse:
