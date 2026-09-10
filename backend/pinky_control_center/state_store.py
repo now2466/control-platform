@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from pinky_control_center.models import Connection, Freshness, RobotState, StateSnapshot
+from pinky_control_center.models import Connection, FormationState, Freshness, RobotState, StateSnapshot
 
 
 class StateStore:
@@ -18,13 +18,16 @@ class StateStore:
         now = self.clock()
         source = self.snapshot_source()
         robots = [self._fresh_robot(robot, now) for robot in source.robots]
+        formation = source.formation
+        if any(not robot.tf_valid or robot.pose is None for robot in robots):
+            formation = formation.model_copy(update={"distance_m": None, "gap_error_m": None, "bearing_rad": None})
         self.sequence += 1
-        return source.model_copy(update={"robots": robots, "seq": self.sequence, "server_time": now})
+        return source.model_copy(update={"robots": robots, "formation": formation, "seq": self.sequence, "server_time": now})
 
     @staticmethod
     def _fresh_robot(robot: RobotState, now: datetime) -> RobotState:
         if robot.received_at is None:
-            return robot.model_copy(update={"connection": Connection.OFFLINE, "pose_freshness": Freshness.UNKNOWN, "battery_freshness": Freshness.UNKNOWN})
+            return robot.model_copy(update={"connection": Connection.OFFLINE, "pose_freshness": Freshness.UNKNOWN, "battery_freshness": Freshness.UNKNOWN, "tf_valid": False, "tf_reason_code": "TF_UNAVAILABLE"})
         age = now - robot.received_at.astimezone(UTC)
         connection = Connection.OFFLINE if age > timedelta(seconds=3) else Connection.STALE if age > timedelta(seconds=1) else robot.connection
         pose_freshness = Freshness.STALE if age > timedelta(seconds=1) else robot.pose_freshness

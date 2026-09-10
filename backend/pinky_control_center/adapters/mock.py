@@ -57,14 +57,6 @@ class MockRobotAdapter:
         ))
         return CommandAcceptance(accepted=True)
 
-    @staticmethod
-    def mock_map() -> dict[str, object]:
-        """Small shared map contract used by both mock robots during T01."""
-        return {
-            "map_id": "mock_lab", "frame_id": "map", "resolution": 0.1,
-            "width": 20, "height": 20, "origin": {"x": 0.0, "y": 0.0, "yaw": 0.0},
-        }
-
     def snapshot(self) -> StateSnapshot:
         now = datetime.now(UTC)
         offline = self._scenario is MockScenario.SLAVE_OFFLINE
@@ -78,6 +70,9 @@ class MockRobotAdapter:
             battery_freshness=Freshness.FRESH, mode=RobotMode.IDLE, stop_latched=False,
             capabilities=["navigate", "camera"],
             sensors=[SensorStatus(name="camera", state=SensorState.OK, received_at=now)],
+            trail=[{"x": 0.6, "y": 2.0}, {"x": 0.9, "y": 2.0}, {"x": 1.2, "y": 2.0}],
+            path=[{"x": 1.2, "y": 2.0}, {"x": 1.5, "y": 2.2}, {"x": 1.8, "y": 2.4}],
+            goal=Pose(x=1.8, y=2.4, yaw=0.4, frame_id="map"),
         )
         slave = RobotState(
             robot_id="robot_2", name=slave_config.name, role=slave_config.role,
@@ -91,6 +86,8 @@ class MockRobotAdapter:
             mode=RobotMode.UNKNOWN if offline else RobotMode.IDLE, stop_latched=None if offline else False,
             capabilities=["follow", "camera"],
             sensors=[SensorStatus(name="camera", state=SensorState.STALE if self._scenario is MockScenario.CAMERA_STALL else SensorState.OK, received_at=None if offline else now)],
+            trail=[] if offline else [{"x": 0.0, "y": 2.0}, {"x": 0.2, "y": 2.0}, {"x": 0.4, "y": 2.0}],
+            path=[] if offline else [{"x": 0.4, "y": 2.0}, {"x": 0.7, "y": 2.1}, {"x": 1.0, "y": 2.2}],
         )
         formation = FormationState(
             state=FormationMode.LOST if self._scenario is MockScenario.FOLLOW_LOST else FormationMode.UNPAIRED,
@@ -100,7 +97,7 @@ class MockRobotAdapter:
             reason_code="MOCK_FOLLOW_LOST" if self._scenario is MockScenario.FOLLOW_LOST else None,
             received_at=now,
         )
-        return StateSnapshot(robots=[master, slave], formation=formation, mode="mock", seq=self._sequence, server_time=now)
+        return StateSnapshot(robots=[master, slave], formation=formation, mode="mock", seq=self._sequence, server_time=now, map_id="mock_lab")
 
     def frame(self, robot_id: RobotId) -> CameraFrame | None:
         if robot_id == "robot_2" and self._scenario is MockScenario.CAMERA_STALL:
@@ -127,7 +124,7 @@ class MockRobotAdapter:
             for state in snapshot.robots:
                 yield AdapterEvent(kind="robot_state", robot_id=state.robot_id, received_at=snapshot.server_time, payload=state.model_dump(mode="json"))
             yield AdapterEvent(kind="formation", received_at=snapshot.server_time, payload=snapshot.formation.model_dump(mode="json"))
-            yield AdapterEvent(kind="map", received_at=snapshot.server_time, payload=self.mock_map())
+            yield AdapterEvent(kind="map", received_at=snapshot.server_time, payload={"map_id": "mock_lab", "version": "1"})
             await asyncio.sleep(0.2)
 
     async def frames(self, robot_id: str) -> AsyncIterator[CameraFrame]:

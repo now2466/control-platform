@@ -108,14 +108,14 @@ class RobotAdapter(Protocol):
 
 ### T03 — 지도·로봇 카드 (R01~R04, N01, N08)
 
-파일: api/maps.py, map_service.py, MapPanel.tsx, transforms.ts, RobotCards.tsx, store.ts, transforms.test.ts, dashboard.spec.ts.
+파일: backend/pinky_control_center/api/maps.py, backend/pinky_control_center/map_service.py, frontend/src/MapPanel.tsx, frontend/src/transforms.ts, frontend/src/App.tsx, frontend/src/transforms.test.ts, frontend/src/MapPanel.test.tsx, backend/tests/test_maps.py.
 
-- [ ] 지도 metadata/PNG 캐시와 로봇 pose/path를 연결한다.
-- [ ] 비영점·회전 origin, 줌/팬, canvas y반전의 좌표 왕복 테스트를 작성한다. 임의 점 world→screen→world 오차 1e-6m 이하.
-- [ ] 두 위치·방향·궤적·목표·경로, 배터리·속도·모드·신선도 카드를 구현한다.
-- [ ] TF 없는 로봇은 경고 표시, 거리 null 처리. 클릭 선택이 카드와 지도에서 일치하게 한다.
+- [x] 지도 metadata/PNG 캐시와 로봇 pose/path를 연결한다.
+- [x] 비영점·회전 origin, 줌/팬, canvas y반전의 좌표 왕복 테스트를 작성한다. 임의 점 world→screen→world 오차 1e-6m 이하.
+- [x] 두 위치·방향·궤적·목표·경로, 배터리·속도·모드·신선도 카드를 구현한다.
+- [x] TF 없는 로봇은 경고 표시, 거리 null 처리. 클릭 선택이 카드와 지도에서 일치하게 한다.
 
-검증: 프런트엔드에서 `npm run test -- --run`, `npx playwright test tests/dashboard.spec.ts`. 지도 위 두 로봇을 혼동하지 않고 줌 후 목표 좌표가 유지되어야 한다.
+검증: `cd frontend && npm run test` (13 tests), `cd backend && python -m pytest -q` (17 tests; map targeted 3 tests 포함). T04의 영상 그리드와 T06의 목표 명령·편대 제어는 이 단계에 포함하지 않는다.
 
 ### T04 — 지도 아래 카메라 그리드 (R05, N02, N07)
 

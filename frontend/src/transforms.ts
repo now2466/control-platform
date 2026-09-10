@@ -1,0 +1,10 @@
+export type MapOrigin = { x: number; y: number; yaw: number }
+export type MapInfo = { width: number; height: number; resolution: number; origin: MapOrigin }
+export type View = { scale: number; offsetX: number; offsetY: number }
+export function worldToCanvas(point: { x: number; y: number }, map: MapInfo, view: View) { const dx = point.x - map.origin.x, dy = point.y - map.origin.y; const c = Math.cos(map.origin.yaw), s = Math.sin(map.origin.yaw); const mx = c * dx + s * dy, my = -s * dx + c * dy; return { x: (mx / map.resolution) * view.scale + view.offsetX, y: ((map.height - my / map.resolution) * view.scale) + view.offsetY } }
+export function canvasToWorld(point: { x: number; y: number }, map: MapInfo, view: View) { const mx = ((point.x - view.offsetX) / view.scale) * map.resolution, my = (map.height - (point.y - view.offsetY) / view.scale) * map.resolution; const c = Math.cos(map.origin.yaw), s = Math.sin(map.origin.yaw); return { x: map.origin.x + c * mx - s * my, y: map.origin.y + s * mx + c * my } }
+export function worldYawToCanvas(yaw: number, map: MapInfo) { return -(yaw - map.origin.yaw) }
+export function centerViewOnWorld(point: { x: number; y: number }, map: MapInfo, scale: number) { const raw = worldToCanvas(point, map, { scale, offsetX: 0, offsetY: 0 }); return { scale, offsetX: map.width / 2 - raw.x, offsetY: map.height / 2 - raw.y } }
+export function isFreeOccupancyCell(point: { x: number; y: number }, map: MapInfo, cells: Uint8ClampedArray) { // PNG rows are top-down, so this y-inverted canvas coordinate matches the rendered image.
+  const pixel = worldToCanvas(point, map, { scale: 1, offsetX: 0, offsetY: 0 }); const x = Math.floor(pixel.x), y = Math.floor(pixel.y); return x >= 0 && y >= 0 && x < map.width && y < map.height && cells[y * map.width + x] === 254 }
+export function staleAgeLabel(receivedAt: string | null | undefined, now = Date.now()) { if (!receivedAt) return '수신 시각 없음'; return `${Math.max(0, Math.floor((now - new Date(receivedAt).getTime()) / 1000))}초 전` }

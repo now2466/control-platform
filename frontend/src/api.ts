@@ -1,4 +1,5 @@
 export type UserSession = { user_id?: string; username: string; role: string }
+export type MapMetadata = { map_id: string; name: string; frame_id: string; resolution: number; width: number; height: number; origin: { x: number; y: number; yaw: number }; version: string; data_url: string }
 
 async function errorMessage(response: Response, fallback: string) {
   try { const body = await response.json(); return body?.error?.message ?? body?.detail ?? fallback } catch { return fallback }
@@ -22,6 +23,12 @@ export async function login(username: string, password: string): Promise<UserSes
   if (!response.ok) throw new Error(await errorMessage(response, `로그인 실패 (${response.status})`))
   const value = await response.json()
   return value.user ?? value
+}
+
+export async function mapMetadata(mapId: string): Promise<MapMetadata> {
+  const response = await fetch(`/api/v1/maps/${mapId}`, { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, `지도 조회 실패 (${response.status})`))
+  return response.json() as Promise<MapMetadata>
 }
 
 export async function logout() {

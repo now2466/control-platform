@@ -113,6 +113,35 @@ class Pose(BaseModel):
     frame_id: str = Field(min_length=1, max_length=128)
 
 
+class MapPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: FiniteFloat
+    y: FiniteFloat
+
+
+class MapOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: FiniteFloat
+    y: FiniteFloat
+    yaw: FiniteFloat = Field(ge=-math.pi, le=math.pi)
+
+
+class MapSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    map_id: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=128)
+
+
+class MapMetadata(MapSummary):
+    frame_id: str = Field(min_length=1, max_length=128)
+    resolution: float = Field(gt=0, le=10)
+    width: int = Field(ge=1, le=4096)
+    height: int = Field(ge=1, le=4096)
+    origin: MapOrigin
+    data_url: str = Field(min_length=1)
+
+
 class SensorStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
@@ -138,6 +167,11 @@ class RobotState(BaseModel):
     stop_latched: bool | None = None
     capabilities: list[str] = Field(default_factory=list)
     sensors: list[SensorStatus] = Field(default_factory=list)
+    trail: list[MapPoint] = Field(default_factory=list, max_length=200)
+    path: list[MapPoint] = Field(default_factory=list, max_length=200)
+    goal: Pose | None = None
+    tf_valid: bool = True
+    tf_reason_code: str | None = Field(default=None, max_length=128)
 
     @field_validator("linear_mps", "angular_rps", "battery_percent", "voltage_v")
     @classmethod
@@ -325,6 +359,7 @@ class StateSnapshot(BaseModel):
     mode: Literal["mock", "ros"]
     seq: int = Field(ge=0)
     server_time: datetime
+    map_id: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def unique_robot_ids(self) -> "StateSnapshot":
