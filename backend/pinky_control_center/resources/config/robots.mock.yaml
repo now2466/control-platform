@@ -1,0 +1,9 @@
+robots:
+  - robot_id: robot_1
+    name: Pinky Master
+    role: MASTER
+    namespace: /robot_1
+  - robot_id: robot_2
+    name: Pinky Slave
+    role: SLAVE
+    namespace: /robot_2

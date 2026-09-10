@@ -1,0 +1,11 @@
+map_id: mock_lab
+name: Mock Lab
+frame_id: map
+resolution: 0.1
+width: 20
+height: 20
+origin:
+  x: 0.0
+  y: 0.0
+  yaw: 0.0
+version: "1"
