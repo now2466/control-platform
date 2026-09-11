@@ -27,7 +27,7 @@ def lease(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
 
 
 def test_history_records_command_lifecycle_and_owner_scopes_results(tmp_path: Path) -> None:
-    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False, start_watchdog=False)
     with TestClient(app) as client:
         app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
         app.state.storage.create_or_reset_user("other", "other-password", UserRole.OPERATOR)
@@ -64,6 +64,43 @@ def test_history_filters_exports_and_keeps_alert_transitions(tmp_path: Path) -> 
         assert [item["event_type"] for item in exported.json()["items"]] == ["ALERT_RESOLVED", "ALERT_ACK", "ALERT_ACTIVE"]
         too_wide = client.get(f"/api/v1/history?from={(now[0] - timedelta(days=32)).isoformat()}&to={now[0].isoformat()}", headers=headers)
         assert too_wide.status_code == 422
+
+
+def test_export_contains_more_than_one_page_and_rejects_an_explicit_cap(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False, start_watchdog=False)
+    with TestClient(app) as client:
+        user = app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+        headers = login(client, "operator", "operator-password")
+        for index in range(101):
+            assert app.state.storage.record_history_safe(event_type="COMMAND_RESULT", user=user, robot_id="robot_1", payload={"index": index})
+        exported = client.get("/api/v1/history/export?robot_id=robot_1", headers=headers)
+        assert exported.status_code == 200
+        assert len(exported.json()["items"]) == 101
+        original = app.state.storage.history
+        app.state.storage.history = lambda *_args, **_kwargs: ([], 1)
+        capped = client.get("/api/v1/history/export?robot_id=robot_1", headers=headers)
+        app.state.storage.history = original
+        assert capped.status_code == 413
+        assert capped.json()["error"]["code"] == "HISTORY_EXPORT_LIMIT"
+
+
+def test_transition_history_keeps_repeated_cycles_but_ignores_same_state_retry(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    user = app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+    mission = app.state.storage.create_mission(user, {"name": "cycle", "state": "DRAFT", "master_id": "robot_1", "slave_id": "robot_2", "map_id": "mock_lab", "waypoints": [{"x": 1, "y": 1, "yaw": 0, "frame_id": "map"}], "repeat_count": 1, "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None})
+    for state in ("RUNNING", "RUNNING", "PAUSED", "RUNNING"):
+        app.state.storage.update_mission(mission["mission_id"], {**mission, "state": state})
+    mission_events, _ = app.state.storage.history(user, event_type="MISSION_TRANSITION", robot_id=None, mission_id=mission["mission_id"], from_time="2000-01-01T00:00:00+00:00", to_time="2100-01-01T00:00:00+00:00", limit=100)
+    assert [item["payload"]["state"] for item in reversed(mission_events)] == ["RUNNING", "PAUSED", "RUNNING"]
+
+    service = app.state.mission_service
+    from pinky_control_center.models import FormationMode
+    service._set_formation(FormationMode.READY)
+    service._set_formation(FormationMode.READY)  # retry: no actual state change
+    service._set_formation(FormationMode.UNPAIRED)
+    service._set_formation(FormationMode.READY)
+    formation_events, _ = app.state.storage.history(user, event_type="FORMATION_CHANGED", robot_id=None, mission_id=None, from_time="2000-01-01T00:00:00+00:00", to_time="2100-01-01T00:00:00+00:00", limit=100)
+    assert [item["payload"]["state"] for item in reversed(formation_events)] == ["READY", "UNPAIRED", "READY"]
 
 
 def test_audit_write_failure_is_degraded_without_blocking_protective_stop(tmp_path: Path, monkeypatch) -> None:

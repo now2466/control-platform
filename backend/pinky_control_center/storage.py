@@ -256,9 +256,10 @@ class Storage:
     def update_mission(self, mission_id: str, payload: dict[str, object]) -> None:
         now = _timestamp(self.clock())
         with self._command_lock, self.connection:
+            previous = self.connection.execute("SELECT user_id,payload_json FROM missions WHERE id=?", (mission_id,)).fetchone()
             self.connection.execute("UPDATE missions SET payload_json=?, state=?, updated_at=? WHERE id=?", (json.dumps(payload), payload["state"], now, mission_id))
-            owner = self.connection.execute("SELECT user_id FROM missions WHERE id=?", (mission_id,)).fetchone()
-        self.record_history_safe(event_type="MISSION_TRANSITION", user_id=owner["user_id"] if owner else None, mission_id=mission_id, payload={"state": payload.get("state"), "failure_code": payload.get("failure_code")}, dedupe_key=f"mission:{mission_id}:state:{payload.get('state')}:{payload.get('waypoint_index')}:{payload.get('lap_index')}:{payload.get('failure_code')}")
+        if previous is not None and json.loads(previous["payload_json"]).get("state") != payload.get("state"):
+            self.record_history_safe(event_type="MISSION_TRANSITION", user_id=previous["user_id"], mission_id=mission_id, payload={"state": payload.get("state"), "failure_code": payload.get("failure_code")})
 
     def create_command(self, user: UserInfo, request_id: UUID, target: str, payload: dict[str, object]) -> dict[str, object]:
         payload_text = json.dumps(payload, sort_keys=True, separators=(",", ":"))

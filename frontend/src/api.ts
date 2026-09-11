@@ -131,19 +131,27 @@ function historyQuery(filters: HistoryFilters, cursor?: number) {
   return query.toString()
 }
 
-export async function getHistory(filters: HistoryFilters = {}, cursor?: number): Promise<{ items: HistoryEvent[]; next_cursor: number | null }> {
-  const response = await fetch(`/api/v1/history${historyQuery(filters, cursor) ? `?${historyQuery(filters, cursor)}` : ''}`, { credentials: 'include' })
+export async function getHistory(filters: HistoryFilters = {}, cursor?: number, limit = 50): Promise<{ items: HistoryEvent[]; next_cursor: number | null }> {
+  const query = new URLSearchParams(historyQuery(filters, cursor)); query.set('limit', String(limit))
+  const response = await fetch(`/api/v1/history?${query.toString()}`, { credentials: 'include' })
   if (!response.ok) throw new Error(await errorMessage(response, '이력 조회 실패'))
   return response.json() as Promise<{ items: HistoryEvent[]; next_cursor: number | null }>
 }
 
 export async function downloadHistory(filters: HistoryFilters = {}) {
-  const query = historyQuery(filters)
-  const response = await fetch(`/api/v1/history/export${query ? `?${query}` : ''}`, { credentials: 'include' })
-  if (!response.ok) throw new Error(await errorMessage(response, '이력 JSON 다운로드 실패'))
-  const blob = await response.blob()
+  const maxEvents = 10_000
+  const items: HistoryEvent[] = []
+  let cursor: number | undefined
+  do {
+    const page = await getHistory(filters, cursor, 100)
+    items.push(...page.items)
+    if (items.length > maxEvents) throw new Error(`이력 내보내기는 최대 ${maxEvents.toLocaleString()}건입니다.`)
+    cursor = page.next_cursor ?? undefined
+  } while (cursor)
+  const content = JSON.stringify({ items, next_cursor: null }, null, 2)
+  const blob = new Blob([content], { type: 'application/json' })
   const link = document.createElement('a')
-  link.href = URL.createObjectURL ? URL.createObjectURL(blob) : `data:application/json;charset=utf-8,${encodeURIComponent(await blob.text())}`
+  link.href = URL.createObjectURL ? URL.createObjectURL(blob) : `data:application/json;charset=utf-8,${encodeURIComponent(content)}`
   link.download = 'history.json'; link.click()
   if (URL.revokeObjectURL && link.href.startsWith('blob:')) URL.revokeObjectURL(link.href)
 }
