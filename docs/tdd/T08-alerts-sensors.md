@@ -11,8 +11,10 @@
 
 리뷰 보완 RED는 기존 `test_alerts.py`에 추가했다. 활성 편대의 COMMUNICATION_LOSS/STALE는 보호 정지를 전혀 요청하지 않았고, 정지 확인 뒤 FOLLOW_LOST는 PAUSED가 되었다. 프런트엔드는 선택을 바꾼 뒤에도 이전 로봇 Scan을 표시했다. 동일 테스트는 보호 정지 1회, LOST 유지·ACK 초기화, 선택 ID 일치 레이어만 렌더링하는 GREEN 결과를 확인한다.
 
+추가 안전 보완 RED는 보호 정지 adapter의 거절/예외가 pending 상태로 남는 것과, 일반 pause pending 중 새 FOLLOW_LOST가 PAUSED로 마무리되는 것을 재현했다. GREEN은 두 대상의 stop을 한 번씩 시도한 뒤 거절 대상을 `STOP_UNCONFIRMED`/`PROTECTIVE_STOP_UNCONFIRMED`으로 노출하고 pending을 해제한다. 이미 진행 중인 일반 pause에는 stop을 재전송하지 않고 FOLLOW_LOST 이유만 승격해 정지 확인 뒤 LOST와 rejoin 경로를 유지한다.
+
 런타임은 새 통신 LOSS/STALE, `FOLLOW_LOST`, `TF_INVALID`, 주행 센서 ERROR, `BATTERY_CRITICAL`에만 편대 보호 정지를 요청한다. 카메라 같은 비주행 센서 ERROR는 경고만 남긴다. FOLLOW_LOST는 정지 확인 후에도 LOST를 유지해 명시적 rejoin 경로를 보존하고, 다른 원인은 PAUSED로 전이한다. sensor detail API의 `UNSUPPORTED`와 `STALE`은 값 대신 상태로 응답하고, 프런트엔드는 각각 `지원하지 않음`·`데이터 지연`으로 표시한다. 선택 변경 시 이전 로봇 레이어를 즉시 비우고 응답 `robot_id`가 현재 선택과 다르면 버린다.
 
 현재 `FormationState.distance_m`에는 측정 유효성/신선도 계약이 없으므로, too-far/too-close 알림은 신뢰할 수 있는 입력을 만들지 않기 위해 추가하지 않았다. T12의 FollowStatus `measurement_valid`와 freshness 연결 뒤에 구현한다.
 
-검증: `cd backend && .venv/bin/python -m pytest -q` → 72 passed, `cd frontend && npm test -- --run` → 46 passed, `cd frontend && npm run build` → 성공 (2026-09-11).
+검증: `cd backend && .venv/bin/python -m pytest -q` → 74 passed, `cd frontend && npm test -- --run` → 46 passed, `cd frontend && npm run build` → 성공 (2026-09-11).

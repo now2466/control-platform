@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pinky_control_center.alert_service import AlertService
 from pinky_control_center.main import create_app
 from pinky_control_center.models import (
+    CommandAcceptance,
     Connection,
     FormationMode,
     Freshness,
@@ -163,3 +164,45 @@ def test_follow_lost_keeps_lost_after_stop_confirmation_and_reactivation_clears_
         asyncio.run(app.state.runtime_tick())
         asyncio.run(app.state.runtime_tick())
         assert app.state.mission_service.formation().state == FormationMode.LOST
+
+
+def test_rejected_protective_stop_becomes_explicit_unconfirmed_alert(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_watchdog=False)
+    with TestClient(app):
+        source = app.state.adapter.snapshot()
+        app.state.state_store.snapshot_source = lambda: source.model_copy(update={"formation": source.formation.model_copy(update={"state": FormationMode.LOST})})
+        calls: list[str] = []
+
+        async def reject_stop(command):
+            calls.append(command.robot_id)
+            return CommandAcceptance(accepted=command.robot_id != "robot_2", reason_code="STOP_REJECTED")
+
+        app.state.adapter.execute = reject_stop
+        asyncio.run(app.state.runtime_tick())
+        assert calls == ["robot_1", "robot_2"]
+        assert app.state.mission_service.formation_pause_pending is None
+        assert app.state.mission_service.formation().state == FormationMode.ERROR
+        assert app.state.mission_service.formation().reason_code == "STOP_UNCONFIRMED"
+        assert any(alert.code == "PROTECTIVE_STOP_UNCONFIRMED" for alert in app.state.alert_service.list(state="ACTIVE"))
+
+
+def test_follow_lost_upgrades_an_existing_manual_pause_without_resending_stop(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_watchdog=False)
+    with TestClient(app):
+        source = app.state.adapter.snapshot()
+        stopped = [robot.model_copy(update={"stop_latched": True, "linear_mps": 0.0, "angular_rps": 0.0}) for robot in source.robots]
+        app.state.state_store.snapshot_source = lambda: source.model_copy(update={"robots": stopped, "formation": source.formation.model_copy(update={"state": FormationMode.LOST})})
+        app.state.state_store.formation_override = source.formation.model_copy(update={"state": FormationMode.PAUSING, "reason_code": "FORMATION_PAUSE"})
+        app.state.mission_service.formation_pause_pending = ("robot_1", "robot_2")
+        app.state.mission_service.formation_pause_reason = "FORMATION_PAUSE"
+        calls: list[str] = []
+
+        async def execute(command):
+            calls.append(command.robot_id)
+            return CommandAcceptance(accepted=True)
+
+        app.state.adapter.execute = execute
+        asyncio.run(app.state.runtime_tick())
+        assert calls == []
+        assert app.state.mission_service.formation().state == FormationMode.LOST
+        assert app.state.mission_service.formation().reason_code == "FOLLOW_LOST"

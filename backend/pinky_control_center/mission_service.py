@@ -29,13 +29,17 @@ class MissionService:
         if mission_id == self.active_id and self.slave_wait_deadline is None:
             self.slave_wait_deadline = self.clock() + 10.0
 
-    async def protective_pause(self, reason: str) -> None:
+    async def protective_pause(self, reason: str) -> tuple[bool, list[str]]:
         """Pause an active formation once for an alert that invalidates safe motion."""
         current = self.formation()
         if current.state not in {FormationMode.FOLLOWING, FormationMode.LOST, FormationMode.PAUSING} and self.active_id is None:
-            return
+            return True, []
         if self.formation_pause_pending is not None:
-            return
+            if reason == "FOLLOW_LOST":
+                # Do not resend an in-flight stop, but keep the recovery path rejoinable.
+                self._set_formation(FormationMode.LOST, "FOLLOW_LOST")
+                self.formation_pause_reason = "FOLLOW_LOST"
+            return True, []
         master, slave = current.master_id, current.slave_id
         if self.active_id:
             row = self.storage.connection.execute("SELECT payload_json FROM missions WHERE id=?", (self.active_id,)).fetchone()
@@ -47,13 +51,22 @@ class MissionService:
                     mission["failure_code"] = reason
                     self.storage.update_mission(self.active_id, mission)
         self._set_formation(FormationMode.LOST if reason == "FOLLOW_LOST" else FormationMode.PAUSING, reason)
+        unconfirmed: list[str] = []
         for robot_id in (master, slave):
             try:
-                await self.adapter.execute(__import__('pinky_control_center.models', fromlist=['CommandRequest']).CommandRequest(command_id=uuid4(), robot_id=robot_id, operation="stop", parameters={"reason": reason}))
+                accepted = await self.adapter.execute(__import__('pinky_control_center.models', fromlist=['CommandRequest']).CommandRequest(command_id=uuid4(), robot_id=robot_id, operation="stop", parameters={"reason": reason}))
+                if not accepted.accepted:
+                    unconfirmed.append(robot_id)
             except Exception:
-                pass
+                unconfirmed.append(robot_id)
+        if unconfirmed:
+            self.formation_pause_pending = None
+            self.formation_pause_reason = None
+            self._set_formation(FormationMode.ERROR, "STOP_UNCONFIRMED")
+            return False, unconfirmed
         self.formation_pause_pending = (master, slave)
         self.formation_pause_reason = reason
+        return True, []
 
     def consume_adapter_event(self, event) -> None:
         """Small adapter-result boundary shared by mock now and ROS event ingestion later."""

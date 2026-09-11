@@ -18,7 +18,7 @@ from pinky_control_center.adapters.mock import MockRobotAdapter
 from pinky_control_center.api import alerts, cameras, control, maps, missions, sensors, session, state, settings
 from pinky_control_center.auth import current_user, verify_mutation
 from pinky_control_center.config import load_mock_config
-from pinky_control_center.models import MockScenario, MockScenarioRequest, UserInfo, UserRole
+from pinky_control_center.models import FormationMode, MockScenario, MockScenarioRequest, UserInfo, UserRole
 from pinky_control_center.map_service import MapService
 from pinky_control_center.camera_service import CameraService
 from pinky_control_center.command_service import CommandService
@@ -106,10 +106,17 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
             mission_service.consume_adapter_event(event)
             if event.kind == "command" and event.payload.get("state") == "REJECTED" and event.robot_id:
                 alert_service.record_command_rejection(event.robot_id, event.payload.get("reason_code") if isinstance(event.payload.get("reason_code"), str) else None)
-        newly_active = alert_service.evaluate(state_store.snapshot())
+        observed = state_store.snapshot()
+        # A transitional local override must not hide a fresh adapter LOST state.
+        source_formation = state_store.snapshot_source().formation
+        if source_formation.state is FormationMode.LOST and observed.formation.state is not FormationMode.LOST:
+            observed = observed.model_copy(update={"formation": source_formation})
+        newly_active = alert_service.evaluate(observed)
         for alert in newly_active:
             if alert.code in {"COMMUNICATION_LOSS", "COMMUNICATION_STALE", "FOLLOW_LOST", "TF_INVALID", "NAVIGATION_SENSOR_ERROR", "BATTERY_CRITICAL"}:
-                await mission_service.protective_pause(alert.code)
+                stopped, unconfirmed = await mission_service.protective_pause(alert.code)
+                if not stopped:
+                    alert_service.record_protective_stop_unconfirmed(alert.code, unconfirmed)
         await mission_service.tick()
         for robot_id in teleop_service.tick():
             await protective_stop(robot_id)

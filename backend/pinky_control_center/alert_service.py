@@ -111,3 +111,8 @@ class AlertService:
         message = f"명령이 거부되었습니다: {reason_code or 'UNKNOWN'}"
         alert = self._condition("COMMAND_REJECTED", robot_id, AlertSeverity.WARNING, message, True)
         return alert is not None
+
+    def record_protective_stop_unconfirmed(self, reason: str, robot_ids: list[str]) -> bool:
+        targets = ", ".join(robot_ids) or "unknown"
+        alert = self._condition("PROTECTIVE_STOP_UNCONFIRMED", None, AlertSeverity.CRITICAL, f"보호 정지를 확인하지 못했습니다 ({reason}): {targets}", True)
+        return alert is not None
