@@ -37,7 +37,7 @@ def default_database_path() -> Path:
     return state_home / "control-platform" / "control.db"
 
 
-def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", monotonic_clock=None, start_command_worker: bool = True, storage_clock=None, start_watchdog: bool = True) -> FastAPI:
+def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", secure_cookies: bool = False, monotonic_clock=None, start_command_worker: bool = True, storage_clock=None, start_watchdog: bool = True) -> FastAPI:
     try:
         worker_count = int(os.environ.get("CONTROL_PLATFORM_WORKERS", "1"))
     except ValueError as error:
@@ -107,6 +107,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
             safety_service.observe(robot.robot_id, stop_latched=bool(robot.stop_latched), linear_mps=robot.linear_mps, angular_rps=robot.angular_rps, fresh=robot.pose_freshness.value == "FRESH")
         command_service.refresh_stops(safety_service.states())
     app.state.allowed_origin = allowed_origin
+    app.state.secure_cookies = secure_cookies
     app.state.state_store = state_store
     state_store.map_id_provider = lambda: settings_service.current().active_map_id
 
@@ -212,6 +213,8 @@ def cli() -> None:
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--config", type=Path, default=None, help="path to robot mapping YAML for the selected mode")
     parser.add_argument("--database", type=Path, default=default_database_path())
+    parser.add_argument("--allowed-origin", default=os.environ.get("CONTROL_PLATFORM_ALLOWED_ORIGIN", "http://localhost:5173"), help="single browser origin allowed for API and WebSocket access")
+    parser.add_argument("--secure-cookies", action=argparse.BooleanOptionalAction, default=os.environ.get("CONTROL_PLATFORM_SECURE_COOKIES", "0") == "1", help="mark session and CSRF cookies Secure (required behind HTTPS)")
     parser.add_argument("--reset-password", metavar="USERNAME")
     parser.add_argument("--password", help="password for --reset-password; never persisted in plaintext")
     parser.add_argument("--role", choices=[role.value for role in UserRole], default=UserRole.ADMIN.value)
@@ -221,7 +224,7 @@ def cli() -> None:
             parser.error("--password is required with --reset-password")
         Storage(args.database).create_or_reset_user(args.reset_password, args.password, UserRole(args.role))
         return
-    uvicorn.run(create_app(args.mode, args.config, args.database), host=args.host, port=args.port, workers=1)
+    uvicorn.run(create_app(args.mode, args.config, args.database, allowed_origin=args.allowed_origin, secure_cookies=args.secure_cookies), host=args.host, port=args.port, workers=1)
 
 
 if __name__ == "__main__":
