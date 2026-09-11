@@ -118,6 +118,28 @@ def test_audit_write_failure_is_degraded_without_blocking_protective_stop(tmp_pa
         assert calls == [("robot_1", "stop"), ("robot_2", "stop")]
 
 
+def test_watchdog_stop_exception_records_sanitized_failure_and_continues(tmp_path: Path, monkeypatch) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False, start_watchdog=False)
+    user = app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+    calls = []
+    original = app.state.adapter.execute
+
+    async def execute(command):
+        calls.append((command.robot_id, command.operation))
+        if command.robot_id == "robot_1":
+            raise RuntimeError("adapter credential secret must not be audited")
+        return await original(command)
+
+    monkeypatch.setattr(app.state.adapter, "execute", execute)
+    asyncio.run(app.state.command_dispatcher.protective_stop("robot_1"))
+    assert calls == [("robot_1", "stop"), ("robot_2", "stop")]
+    events, _ = app.state.storage.history(user, event_type="SAFETY_STOP", robot_id=None, mission_id=None, from_time="2000-01-01T00:00:00+00:00", to_time="2100-01-01T00:00:00+00:00", limit=100)
+    outcomes = {item["robot_id"]: item["payload"] for item in events}
+    assert outcomes["robot_1"] == {"source_robot": "robot_1", "accepted": False, "outcome": "EXCEPTION", "failure_code": "ADAPTER_EXCEPTION"}
+    assert outcomes["robot_2"]["outcome"] == "ACKNOWLEDGED"
+    assert "secret" not in str(outcomes)
+
+
 def test_main_sqlite_connection_serializes_watchdog_expiry_and_command_updates(tmp_path: Path) -> None:
     app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
     user = app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)

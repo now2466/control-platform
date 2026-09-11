@@ -10,13 +10,14 @@ SQLite `history_events`는 30일 보존의 작고 append-only인 운용 이벤�
 
 - `backend/tests/test_t10_history.py`에서 명령 lifecycle/result 이력, 다른 사용자의 이력 비노출, robot/event filter·cursor, 101건 JSON export 완전성, 명시적 export cap, 그리고 임무·편대 반복 cycle/retry를 먼저 작성했다.
 - 동일 테스트에서 audit writer를 실패시키고 watchdog 보호 정지를 호출해도 양쪽 stop adapter 호출이 끝까지 실행되는지를 작성했다.
+- 같은 테스트에서 첫 stop adapter 예외 뒤에도 두 번째 stop을 호출하고, 실패 시도는 민감한 예외 원문 없이 `ADAPTER_EXCEPTION` 결과로 남기는지를 작성했다.
 - `frontend/src/T10.test.tsx`에서 유형 filter 조회와 현재 filter를 보존하는 JSON 다운로드를 먼저 작성했다.
 
 ## GREEN
 
 - migration 007은 owner, event type, robot/mission scope, UTC timestamp, 제한된 JSON payload를 저장한다. 각 write에서 30일보다 오래된 이벤트를 정리한다.
 - `GET /api/v1/history`와 `/api/v1/history/export`는 인증을 요구하고, 사용자 소유 이벤트와 공통 안전/알림 이벤트만 반환한다. 기본 범위는 최근 24시간, 요청 가능 최대 범위는 30일이고 limit은 1~100이다. cursor는 마지막 event id다. export는 complete file만 반환하며 10,000건을 넘으면 `413 HISTORY_EXPORT_LIMIT`으로 명시적으로 거절한다.
-- history writer는 SQLite 오류를 잡아 `audit history degraded` 경고만 기록한다. 제어 dispatcher와 보호 정지는 이 실패를 기다리거나 전파하지 않는다.
+- history writer는 SQLite 오류를 잡아 `audit history degraded` 경고만 기록한다. 제어 dispatcher와 보호 정지는 이 실패를 기다리거나 전파하지 않는다. watchdog stop은 `ACKNOWLEDGED`·`REJECTED`·`EXCEPTION` 결과를 구분해 남긴다.
 - History UI는 event type·로봇·임무 ID·UTC 범위를 필터링하고 페이지를 이어 읽으며, 다운로드할 때도 100건 cursor page를 모두 이어 받아 최대 10,000건의 완전한 `history.json`을 만든다.
 
 ## 검증

@@ -73,9 +73,11 @@ class CommandDispatcher:
         for target in ("robot_1", "robot_2"):
             try:
                 result = await self.adapter.execute(CommandRequest(command_id=command_id, robot_id=target, operation="stop", parameters={"reason": "WATCHDOG", "source_robot": robot_id}))
-                self.storage.record_history_safe(event_type="SAFETY_STOP", robot_id=target, payload={"source_robot": robot_id, "accepted": result.accepted}, dedupe_key=f"safety-stop:{command_id}:{target}")
+                self.storage.record_history_safe(event_type="SAFETY_STOP", robot_id=target, payload={"source_robot": robot_id, "accepted": result.accepted, "outcome": "ACKNOWLEDGED" if result.accepted else "REJECTED"}, dedupe_key=f"safety-stop:{command_id}:{target}")
             except Exception:
                 # A watchdog must complete its remaining safety work after one adapter fails.
+                # Never persist an exception message: adapters can contain credentials or transport details.
+                self.storage.record_history_safe(event_type="SAFETY_STOP", robot_id=target, payload={"source_robot": robot_id, "accepted": False, "outcome": "EXCEPTION", "failure_code": "ADAPTER_EXCEPTION"}, dedupe_key=f"safety-stop:{command_id}:{target}")
                 continue
 
     def refresh_stops(self, observations: dict[str, str]) -> None:
