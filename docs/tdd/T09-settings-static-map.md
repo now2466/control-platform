@@ -19,6 +19,8 @@ SLAM 지도 생성/저장/리셋, LED·lamp·LCD/감정 장치, 역할 교환·�
 - migration 006의 `active_settings` compare-and-swap과 `SettingsService`가 mock adapter의 pair-wide 적용 성공 뒤에만 새 설정을 저장한다.
 - map 선택은 이동 중이거나 편대/임무가 활성인 경우 거절한다. initial pose도 별도의 정지 검증을 통과해야 한다.
 - `SettingsPage`는 활성 지도, 모든 제한값, 품질, 선택 로봇 pose 입력을 표시하고 ADMIN 외 사용자에게 변경을 비활성화한다.
+- 임무 생성은 현재 활성 static map만 받으며, pair/follow-start와 slave settle은 저장된 거리·허용 오차를 사용한다. manual WebSocket도 저장된 선/각속도를 초과하면 `SETTINGS_SPEED_LIMIT`으로 거절한다.
+- `mock_lab_b`는 별도 deterministic occupancy PNG를 제공한다. 두 map은 이름, ETag, 픽셀 fixture가 같지 않다.
 
 ## 검증
 
@@ -29,3 +31,5 @@ frontend/npm run build
 ```
 
 mock adapter 검증은 실제 로봇 설정 또는 초기 위치 적용의 증거가 아니다. T12에서 로봇별 ROS command/status 계약, 하드웨어 속도 상한, 실제 map frame을 별도로 확인해야 한다.
+
+설정 apply의 adapter 상태와 SQLite 상태를 한 process에서 함께 유지해야 하므로 서비스는 단일 worker만 지원한다. CLI는 `workers=1`로 실행하며 `CONTROL_PLATFORM_WORKERS`가 1 이외의 값이면 시작을 거절한다. 다중 worker 배포는 T13에서 process 간 adapter ownership/coordination을 추가한 뒤에만 허용한다.

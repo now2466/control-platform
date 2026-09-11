@@ -8,9 +8,9 @@ class TeleopService:
     def enter(self, robot_id: str, *, lease_valid: bool) -> None:
         if not lease_valid: raise PermissionError("CONTROL_CONFLICT")
         self.entered[robot_id]=self.clock()
-    def ingest(self, robot_id: str, seq: int, linear: float, angular: float) -> str:
+    def ingest(self, robot_id: str, seq: int, linear: float, angular: float, max_linear: float = 1, max_angular: float = 2) -> str:
         previous=self.active.get(robot_id)
-        if robot_id not in self.entered or abs(linear)>1 or abs(angular)>2 or previous and seq<=previous[0]: return "REJECTED"
+        if robot_id not in self.entered or abs(linear)>max_linear or abs(angular)>max_angular or previous and seq<=previous[0]: return "REJECTED"
         self.active[robot_id]=(seq,self.clock()); return "ACCEPTED"
     def tick(self) -> dict[str,str]:
         now=self.clock(); result={}

@@ -37,6 +37,12 @@ def default_database_path() -> Path:
 
 
 def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", monotonic_clock=None, start_command_worker: bool = True, storage_clock=None, start_watchdog: bool = True) -> FastAPI:
+    try:
+        worker_count = int(os.environ.get("CONTROL_PLATFORM_WORKERS", "1"))
+    except ValueError as error:
+        raise ValueError("CONTROL_PLATFORM_WORKERS must declare a single worker") from error
+    if worker_count != 1:
+        raise ValueError("settings application requires a single worker")
     if mode != "mock":
         raise ValueError("ROS mode is not available in T01; start with --mode mock")
     adapter = MockRobotAdapter(config=load_mock_config(config_path))
@@ -49,9 +55,9 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     runtime_clock = monotonic_clock or time.monotonic
     teleop_service = TeleopService(runtime_clock)
     safety_service = SafetyService(runtime_clock)
-    mission_service = MissionService(storage, adapter, state_store, runtime_clock)
     alert_service = AlertService(storage)
     settings_service = SettingsService(storage, adapter, map_service, state_store)
+    mission_service = MissionService(storage, adapter, state_store, runtime_clock, settings_service.current)
     state_store.alert_provider = lambda: alert_service.list(state="ACTIVE")
     for operation in ("formation_pair", "formation_start", "formation_pause", "formation_unpair", "formation_rejoin"):
         command_service.handlers[operation] = mission_service.execute_formation
@@ -203,7 +209,7 @@ def cli() -> None:
             parser.error("--password is required with --reset-password")
         Storage(args.database).create_or_reset_user(args.reset_password, args.password, UserRole(args.role))
         return
-    uvicorn.run(create_app("mock", args.config, args.database), host=args.host, port=args.port)
+    uvicorn.run(create_app("mock", args.config, args.database), host=args.host, port=args.port, workers=1)
 
 
 if __name__ == "__main__":

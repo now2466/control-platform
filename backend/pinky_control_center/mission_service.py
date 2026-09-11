@@ -10,8 +10,9 @@ from pinky_control_center.models import Connection, FormationMode, FormationStat
 
 class MissionService:
     """T06 orchestration. Adapter calls are deliberately ordered here, before ROS actions exist."""
-    def __init__(self, storage, adapter, state_store, clock) -> None:
+    def __init__(self, storage, adapter, state_store, clock, settings_provider) -> None:
         self.storage, self.adapter, self.state_store, self.clock = storage, adapter, state_store, clock
+        self.settings_provider = settings_provider
         self.active_id: str | None = None
         self.slave_wait_deadline: float | None = None
         self.formation_pause_pending: tuple[str, str] | None = None
@@ -127,7 +128,7 @@ class MissionService:
             robots = {robot.robot_id: robot for robot in self.state_store.snapshot().robots}
             slave = robots[mission["slave_id"]]
             formation = self.formation()
-            settled = slave.stop_latched and slave.pose_freshness == Freshness.FRESH and abs(slave.linear_mps or 0) < .01 and abs(slave.angular_rps or 0) < .02 and formation.distance_m is not None and abs(formation.distance_m - formation.target_distance_m) <= .2
+            settled = slave.stop_latched and slave.pose_freshness == Freshness.FRESH and abs(slave.linear_mps or 0) < .01 and abs(slave.angular_rps or 0) < .02 and formation.distance_m is not None and abs(formation.distance_m - formation.target_distance_m) <= self.settings_provider().follow_tolerance_m
             if settled:
                 # Mark this completion consumed before awaiting the next adapter call.
                 self.slave_wait_deadline = float("inf")
@@ -205,7 +206,8 @@ class MissionService:
         action = operation.removeprefix("formation_")
         master, slave = str(parameters.get("master_id", "robot_1")), str(parameters.get("slave_id", "robot_2"))
         if action == "pair":
-            self.state_store.formation_override = FormationState(state=FormationMode.READY, master_id=master, slave_id=slave, target_distance_m=.8, distance_m=.8, gap_error_m=0.)
+            distance = self.settings_provider().follow_distance_m
+            self.state_store.formation_override = FormationState(state=FormationMode.READY, master_id=master, slave_id=slave, target_distance_m=distance, distance_m=distance, gap_error_m=0.)
         elif action == "unpair": self._set_formation(FormationMode.UNPAIRED)
         elif action == "pause":
             from pinky_control_center.models import CommandRequest
@@ -245,7 +247,9 @@ class MissionService:
                 Pose.model_validate(waypoint)
         except Exception as error: raise HTTPException(422, detail="INVALID_VALUE") from error
         data = {"name": payload.get("name"), "state": MissionState.DRAFT.value, "master_id": self.formation().master_id, "slave_id": self.formation().slave_id, "map_id": payload.get("map_id"), "waypoints": waypoints, "repeat_count": payload.get("repeat_count", 1), "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None, "version": 1}
-        if not isinstance(data["name"], str) or not isinstance(data["map_id"], str) or data["map_id"] != "mock_lab" or not isinstance(data["repeat_count"], int) or not 1 <= data["repeat_count"] <= 100: raise HTTPException(422, detail="INVALID_VALUE")
+        if not isinstance(data["name"], str) or not isinstance(data["map_id"], str) or not isinstance(data["repeat_count"], int) or not 1 <= data["repeat_count"] <= 100: raise HTTPException(422, detail="INVALID_VALUE")
+        if data["map_id"] != self.settings_provider().active_map_id:
+            raise HTTPException(409, detail="MAP_NOT_ACTIVE")
         return self.storage.create_mission_idempotent(user, UUID(str(payload["request_id"])), data)
 
     def edit(self, user: UserInfo, mission_id: str, payload: dict[str, object]) -> dict[str, object]:
@@ -304,7 +308,10 @@ class MissionService:
         if action == "validate": mission["state"] = "READY"
         elif action in {"start", "resume"}:
             mission["state"] = "STARTING"; slave, master = mission["slave_id"], mission["master_id"]
-            calls = [(slave, "follow_ready", {}), (slave, "follow_start", {})]
+            settings = self.settings_provider()
+            current = self.formation()
+            self.state_store.formation_override = current.model_copy(update={"target_distance_m": settings.follow_distance_m})
+            calls = [(slave, "follow_ready", {}), (slave, "follow_start", {"target_distance_m": settings.follow_distance_m, "tolerance_m": settings.follow_tolerance_m})]
             for robot_id, op, params in calls:
                 accepted = await self.adapter.execute(__import__('pinky_control_center.models', fromlist=['CommandRequest']).CommandRequest(command_id=uuid4(), robot_id=robot_id, operation=op, parameters=params))
                 if not accepted.accepted:

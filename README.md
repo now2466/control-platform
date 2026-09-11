@@ -52,6 +52,8 @@ mkdir -p ~/.local/state/control-platform
 
 T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T09는 versioned active settings, ADMIN 설정 화면, 정지 상태 초기 위치와 두 정적 지도 선택을 제공한다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 T12 이후 범위다.
 
+설정 적용은 adapter와 SQLite의 활성값을 같은 프로세스에서 함께 갱신하므로 현재 서버는 단일 worker만 지원한다. CLI는 worker 1개로 실행되며 `CONTROL_PLATFORM_WORKERS=1` 이외의 선언은 시작 시 거절한다.
+
 새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. 단계별 증거는 `docs/tdd/`에 기록하며 설정·수집 실패와 실제 동작 assertion 실패를 구분한다.
 
 T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.

@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from pinky_control_center.main import create_app
-from pinky_control_center.models import MockScenario, RobotMode, UserRole
+from pinky_control_center.models import ActiveSettings, MockScenario, RobotMode, UserRole
 
 ORIGIN = "http://localhost:5173"
 
@@ -81,3 +81,31 @@ def test_initial_pose_requires_selected_robot_stopped_and_duplicate_request_exec
         app.state.state_store.snapshot_source = lambda: source.model_copy(update={"robots": [source.robots[0].model_copy(update={"mode": RobotMode.AUTO}), source.robots[1]]})
         blocked = client.post("/api/v1/robots/robot_1/initial-pose", json={"request_id": str(uuid4()), "pose": payload["pose"]}, headers=headers)
         assert blocked.status_code == 409
+
+
+def test_active_map_controls_mission_creation_and_persisted_speed_limits_manual_input(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    with TestClient(app) as client:
+        app.state.storage.create_or_reset_user("admin", "admin-password", UserRole.ADMIN)
+        headers = _login(client, "admin", "admin-password")
+        changed = client.put("/api/v1/settings", json=_payload(max_linear_mps=.1, max_angular_rps=.2), headers=headers)
+        assert changed.status_code == 200
+        lease = client.post("/api/v1/control-lease", json={"request_id": str(uuid4())}, headers=headers).json()["lease_id"]
+        mission = {"request_id": str(uuid4()), "name": "active map", "map_id": "mock_lab_b", "waypoints": [{"x": 1, "y": 1, "yaw": 0, "frame_id": "map"}], "repeat_count": 1, "lease_id": lease}
+        assert client.post("/api/v1/missions", json=mission, headers=headers).status_code == 201
+        stale = {**mission, "request_id": str(uuid4()), "map_id": "mock_lab"}
+        assert client.post("/api/v1/missions", json=stale, headers=headers).status_code == 409
+        with client.websocket_connect("/ws/teleop", headers={"origin": ORIGIN}) as socket:
+            socket.send_json({"lease_id": lease, "robot_id": "robot_1", "seq": 1, "linear_mps": .11, "angular_rps": 0})
+            assert socket.receive_json() == {"type": "rejected", "reason_code": "SETTINGS_SPEED_LIMIT"}
+            socket.send_json({"lease_id": lease, "robot_id": "robot_1", "seq": 2, "linear_mps": .1, "angular_rps": .2})
+            assert socket.receive_json() == {"type": "accepted", "seq": 2}
+
+
+def test_settings_require_declared_single_worker(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("CONTROL_PLATFORM_WORKERS", "2")
+    try:
+        create_app(database_path=tmp_path / "control.db")
+        assert False, "multiple workers must be rejected while settings apply is process-local"
+    except ValueError as error:
+        assert "single worker" in str(error)

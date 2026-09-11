@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pinky_control_center.main import create_app
 from pinky_control_center.models import UserRole
 from pinky_control_center.models import MockScenario
+from pinky_control_center.models import ActiveSettings
 
 ORIGIN = "http://localhost:5173"
 
@@ -28,6 +29,47 @@ def test_pair_requires_ready_robots_and_transitions_to_ready(tmp_path: Path):
         assert pair.status_code == 202
         asyncio.run(app.state.command_dispatcher.process_next())
         assert client.get("/api/v1/state").json()["formation"]["state"] == "READY"
+
+
+def test_persisted_follow_settings_drive_pair_goal_and_follow_start(tmp_path: Path):
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    with TestClient(app) as client:
+        h = headers(client)
+        app.state.storage.update_settings(1, ActiveSettings(version=1, active_map_id="mock_lab", follow_distance_m=1.1, follow_tolerance_m=.07, max_linear_mps=.15, max_angular_rps=.5, camera_quality="default"))
+        pair = client.post("/api/v1/formation/actions", json={"request_id": str(uuid4()), "action": "pair", "master_id": "robot_1", "slave_id": "robot_2"}, headers=h)
+        assert pair.status_code == 202
+        asyncio.run(app.state.command_dispatcher.process_next())
+        assert client.get("/api/v1/state").json()["formation"]["target_distance_m"] == 1.1
+        mission = client.post("/api/v1/missions", json={"request_id": str(uuid4()), "name": "configured", "map_id": "mock_lab", "waypoints": [{"x": 2, "y": 2, "yaw": 0, "frame_id": "map"}], "repeat_count": 1}, headers=h).json()
+        client.post(f"/api/v1/missions/{mission['mission_id']}/actions", json={"request_id": str(uuid4()), "action": "validate"}, headers=h)
+        asyncio.run(app.state.command_dispatcher.process_next())
+        calls = []; original = app.state.adapter.execute
+        async def execute(command): calls.append(command); return await original(command)
+        app.state.adapter.execute = execute
+        client.post(f"/api/v1/missions/{mission['mission_id']}/actions", json={"request_id": str(uuid4()), "action": "start"}, headers=h)
+        asyncio.run(app.state.command_dispatcher.process_next())
+        follow = next(command for command in calls if command.operation == "follow_start")
+        assert follow.parameters == {"target_distance_m": 1.1, "tolerance_m": .07}
+
+
+def test_persisted_follow_tolerance_controls_slave_settling(tmp_path: Path):
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    with TestClient(app):
+        user = app.state.storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+        app.state.storage.update_settings(1, ActiveSettings(version=1, active_map_id="mock_lab", follow_distance_m=1.1, follow_tolerance_m=.07, max_linear_mps=.15, max_angular_rps=.5, camera_quality="default"))
+        mission = app.state.storage.create_mission(user, {"name": "settle", "state": "RUNNING", "master_id": "robot_1", "slave_id": "robot_2", "map_id": "mock_lab", "waypoints": [{"x": 2, "y": 2, "yaw": 0, "frame_id": "map"}], "repeat_count": 1, "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None})
+        source = app.state.adapter.snapshot()
+        stopped = source.robots[1].model_copy(update={"stop_latched": True, "linear_mps": 0., "angular_rps": 0.})
+        app.state.state_store.snapshot_source = lambda: source.model_copy(update={"robots": [source.robots[0], stopped]})
+        app.state.mission_service.active_id = mission["mission_id"]
+        from pinky_control_center.models import FormationMode, FormationState
+        app.state.state_store.formation_override = FormationState(state=FormationMode.FOLLOWING, master_id="robot_1", slave_id="robot_2", target_distance_m=1.1, distance_m=1.18, gap_error_m=.08)
+        app.state.mission_service.master_navigation_succeeded(mission["mission_id"])
+        asyncio.run(app.state.runtime_tick())
+        assert app.state.storage.mission(mission["mission_id"], user)["state"] == "RUNNING"
+        app.state.state_store.formation_override = app.state.state_store.formation_override.model_copy(update={"distance_m": 1.16, "gap_error_m": .06})
+        asyncio.run(app.state.runtime_tick())
+        assert app.state.storage.mission(mission["mission_id"], user)["state"] == "SUCCEEDED"
 
 
 def test_mission_start_sends_slave_ready_and_follow_before_master_navigation(tmp_path: Path):
