@@ -1,0 +1,25 @@
+[Unit]
+Description=Pinky Control Center API (single worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=control-center
+Group=control-center
+WorkingDirectory=/opt/pinky-control-platform
+EnvironmentFile=/etc/pinky-control-center/control-center.env
+ExecStart=/opt/pinky-control-platform/deployment/scripts/start-backend.sh
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pinky-control-center /var/log/pinky-control-center
+StandardOutput=append:/var/log/pinky-control-center/server.log
+StandardError=append:/var/log/pinky-control-center/server.log
+
+[Install]
+WantedBy=multi-user.target

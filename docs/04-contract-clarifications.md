@@ -6,13 +6,13 @@
 
 기능 명세의 READY/PAUSED → FOLLOWING 전이에서 start/resume는 임무의 start/resume를 뜻한다. `/formation/actions`는 pair/pause/unpair/rejoin만 받는다. 추종 준비 및 시작은 임무 시작 절차 내부에서 로봇 FollowCommand의 start를 호출해 수행한다. 별도의 관제 formation start API는 구현하지 않는다. 따라서 준비만 된 상태와 실제 추종 중 상태를 혼동하지 않는다.
 
-## 로봇 등록·역할 변경 API
+## 로봇 등록·역할 변경 API (후속 범위)
 
 로봇 역할 변경은 고정 domain ID 정책과 별개다. `robot_1`은 ROS_DOMAIN_ID 12, `robot_2`는 13으로 배포 설정에서 고정하며 이 값은 해당 API나 관제 UI에서 변경할 수 없다.
 
 - `PUT /api/v1/robots/{id}`: request_id, version, name, namespace, topic_mapping, frame_mapping을 받는다. 관리자만 실행하며 두 로봇 정지 및 편대 해제 상태가 필요하다. ID는 robot_1/robot_2만 허용하고 중복 namespace를 거부한다. 응답은 적용된 설정과 새 version이다. 설정 실패 시 기존 활성 값을 유지한다.
 - `POST /api/v1/formation/roles`: request_id, master_id, slave_id를 받는다. 서로 다른 등록 ID와 양쪽 정지·편대 해제를 검증한다. 응답은 command이며 완료 후 지도·영상·카드 역할을 한 스냅샷에서 갱신한다.
-- T09에서 위 API와 관리자 화면을 구현하고 test_settings.py에서 이동 중 변경 거부·중복 namespace·역할 교환을 검증한다.
+- 이 API는 현재 T09 축소 범위에서 구현하지 않는다. T12에서 실제 ROS namespace·topic/frame mapping 계약을 확인한 뒤 관리자 화면과 함께 구현한다.
 
 ## 지도 센서 레이어 실시간 계약
 

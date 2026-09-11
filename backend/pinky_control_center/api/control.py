@@ -131,8 +131,11 @@ async def teleop(websocket: WebSocket) -> None:
         except (KeyError, ValueError, TypeError):
             await websocket.send_json({"type": "rejected", "reason_code": "INVALID_VALUE"})
             continue
-        if robot_id not in {"robot_1", "robot_2"} or abs(linear) > 1 or abs(angular) > 2:
+        limits = websocket.app.state.settings_service.current()
+        if robot_id not in {"robot_1", "robot_2"}:
             await websocket.send_json({"type": "rejected", "reason_code": "INVALID_VALUE"})
+        elif abs(linear) > limits.max_linear_mps or abs(angular) > limits.max_angular_rps:
+            await websocket.send_json({"type": "rejected", "reason_code": "SETTINGS_SPEED_LIMIT"})
         elif seq <= last_seq:
             await websocket.send_json({"type": "rejected", "reason_code": "OUT_OF_ORDER"})
         elif not websocket.app.state.storage.owns_lease(lease_id, user, websocket.cookies.get("cc_session", "")):
@@ -144,5 +147,5 @@ async def teleop(websocket: WebSocket) -> None:
                 service.enter(robot_id, lease_valid=True)
             except PermissionError:
                 await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"}); continue
-            result = service.ingest(robot_id, seq, linear, angular)
+            result = service.ingest(robot_id, seq, linear, angular, limits.max_linear_mps, limits.max_angular_rps)
             await websocket.send_json({"type": result.lower(), "seq": seq})

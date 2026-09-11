@@ -2,7 +2,7 @@
 
 작성일: 2026-09-10 · 버전: 1.0 · 상태: 구현 기준안
 
-마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. 현재 T01~T05의 모의 실행 범위를 제공하며, 실물 연동은 후속 작업이다.
+마스터 1대와 슬레이브 1대의 추종 운용을 위한 독립 관제 플랫폼 프로젝트다. mock 운용·ROS bridge adapter·배포 런북을 제공하며, 실제 ROS graph/Gazebo/하드웨어 인수는 별도 게이트로 기록한다.
 
 ## 실행
 
@@ -40,19 +40,21 @@ mkdir -p ~/.local/state/control-platform
 | T03 | 지도·로봇 카드 | 완료 |
 | T04 | 카메라 그리드 | 완료 |
 | T05 | 정지·수동 조작·권한 | 완료 |
-| T06 | 편대 상태 전이·안전 | 미구현 |
-| T07 | 임무·알림 | 미구현 |
-| T08 | 지도 센서 레이어 | 미구현 |
-| T09 | 설정·로봇 등록 | 미구현 |
-| T10 | 기록·검색 | 미구현 |
-| T11 | 재생·운영 문서 | 미구현 |
-| T12 | ROS 2·실물 인터페이스 연동 | 미구현 |
-| T13 | 인증 강화·배포 | 미구현 |
-| T14 | 통합 인수·실물 검증 | 미구현 |
+| T06 | 편대·단일 목표 임무 | 완료(mock) |
+| T07 | 경유점·순찰 | 완료(mock) |
+| T08 | 알림·지도 센서 레이어 | 완료(mock) |
+| T09 | 설정·정적 지도·초기 위치 | 완료(mock, 축소 범위) |
+| T10 | 기록·검색 | 완료 — 30일 운용 이력, 조건 조회·JSON 내보내기 |
+| T11 | 영상 기록·동기 재생 | 범위 제외 |
+| T12 | ROS 2·실물 인터페이스 연동 | 부분 완료 — adapter/contract test; 실제 graph·TF·camera·stop은 NOT_RUN |
+| T13 | 인증 강화·배포 | 부분 완료 — TLS 동일 출처 proxy, single-worker service, env 검증, runbook |
+| T14 | 통합 인수·실물 검증 | 부분 완료 — mock acceptance smoke; Gazebo·실물 시험 NOT_RUN |
 
-T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드는 완료했으며, 목표 명령과 편대 제어는 T06 이후 범위다. 현재 검증은 frontend 19 tests와 backend 21 tests를 통과했다.
+T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T09는 versioned active settings, ADMIN 설정 화면, 정지 상태 초기 위치와 두 정적 지도 선택을 제공한다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 T12 이후 범위다.
 
-새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. T04의 상세 RED/GREEN 증거는 `docs/tdd/T04-camera-grid.md`에 기록한다. 현재 확인된 genuine RED는 quality selector 부재 assertion이며, decoder 초기 import 실패와 구현 뒤 작성된 보조 테스트는 각각 setup/characterization evidence로 구분한다.
+설정 적용은 adapter와 SQLite의 활성값을 같은 프로세스에서 함께 갱신하므로 현재 서버는 단일 worker만 지원한다. CLI는 worker 1개로 실행되며 `CONTROL_PLATFORM_WORKERS=1` 이외의 선언은 시작 시 거절한다.
+
+새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. 단계별 증거는 `docs/tdd/`에 기록하며 설정·수집 실패와 실제 동작 assertion 실패를 구분한다.
 
 T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
 
@@ -60,14 +62,17 @@ T05 frontend 검증은 frontend Vitest 27개와 backend mock/runtime tests 38개
 
 실물 연결은 로봇별 rosbridge websocket을 사용한다. 배포 고정값은 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`이며 관제 UI/API에서 domain ID를 변경하지 않는다. backend의 RobotAdapter가 두 연결을 관리하고 bridge URL·인증/TLS·토픽 매핑만 설정으로 관리한다. 브라우저는 rosbridge에 직접 연결하지 않으며 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
 
+배포와 mock 수용 절차는 [runbook.md](runbook.md), 결과 추적표는 [acceptance-report.md](acceptance-report.md)에서 관리한다. rosbridge launch는 API systemd 서비스와 별도 lifecycle이며, Gazebo 기본 spawn 위치 중첩과 compressed camera topic은 실제 인수 전까지 미검증으로 유지한다.
+
 ## 읽는 순서
 
-1. [요구사항 정의서](docs/01-requirements.md): 범위, 우선순위, 인수 기준, 담당 경계.
-2. [기능·인터페이스 명세서](docs/02-functional-spec.md): 화면, 상태 전이, API, ROS 계약, 저장 구조.
-3. [구현 계획](docs/03-implementation-plan.md): 파일 구조, 작업 순서, 검증, 실물 연동 게이트.
-4. [계약 보완](docs/04-contract-clarifications.md): API와 상태 계약의 보완 규칙.
+1. [사용자 가이드](docs/user-guide.md): 실행, 화면 구성, 편대·임무·정지·카메라 사용법.
+2. [요구사항 정의서](docs/01-requirements.md): 범위, 우선순위, 인수 기준, 담당 경계.
+3. [기능·인터페이스 명세서](docs/02-functional-spec.md): 화면, 상태 전이, API, ROS 계약, 저장 구조.
+4. [구현 계획](docs/03-implementation-plan.md): 파일 구조, 작업 순서, 검증, 실물 연동 게이트.
+5. [계약 보완](docs/04-contract-clarifications.md): API와 상태 계약의 보완 규칙.
 
-P0/P1/P2는 개발 순서이다. P2도 최종 납품 범위에 포함한다. 모의 데이터 검증 완료와 실물 로봇 검증 완료는 별도로 보고한다.
+P0/P1/P2는 개발 순서이다. T11/R14 영상 기록·동기 재생은 사용자 결정으로 제외했으며, 나머지 범위의 모의 데이터 검증 완료와 실물 로봇 검증 완료를 별도로 보고한다.
 
 ## 구현 시 사용할 지시문
 

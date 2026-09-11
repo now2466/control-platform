@@ -104,9 +104,10 @@ def test_camera_images_are_jpeg_and_are_distinct_per_robot(tmp_path: Path) -> No
         assert client.get("/api/v1/cameras/robot_1").status_code == 200
 
 
-def test_ros_mode_is_not_silently_replaced_by_mock(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        create_app("ros", database_path=tmp_path / "control.db")
+def test_ros_mode_uses_the_rosbridge_adapter_not_mock(tmp_path: Path) -> None:
+    app = create_app("ros", database_path=tmp_path / "control.db")
+    assert app.state.mode == "ros"
+    assert type(app.state.adapter).__name__ == "RosbridgeAdapter"
 
 
 def test_mock_execute_returns_acceptance_before_completion_event() -> None:

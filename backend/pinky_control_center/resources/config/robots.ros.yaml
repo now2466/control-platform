@@ -1,0 +1,50 @@
+# Deployment-only mapping. ROS_DOMAIN_ID is set when each rosbridge process is
+# launched; the control center validates this identity but never changes it.
+robots:
+  - robot_id: robot_1
+    name: Pinky Master
+    role: MASTER
+    namespace: /robot_1
+    domain_id: 12
+    bridge_url: ws://robot-1.local:9090
+    topics:
+      odom: /robot_1/odom
+      battery_percent: /robot_1/battery/percent
+      battery_voltage: /robot_1/battery/voltage
+      camera_compressed: /robot_1/camera/image_raw/compressed
+      control_status: /robot_1/control/status
+      path: /robot_1/plan
+      manual_velocity: /robot_1/control/manual_velocity
+      initial_pose: /robot_1/initialpose
+    services:
+      control_command: /robot_1/control/command
+      control_command_type: pinky_control_interfaces/srv/ControlCommand
+      control_available: false
+    camera:
+      throttle_rate_ms: 100
+      fragment_size: 65536
+  - robot_id: robot_2
+    name: Pinky Slave
+    role: SLAVE
+    namespace: /robot_2
+    domain_id: 13
+    bridge_url: ws://robot-2.local:9091
+    topics:
+      odom: /robot_2/odom
+      battery_percent: /robot_2/battery/percent
+      battery_voltage: /robot_2/battery/voltage
+      camera_compressed: /robot_2/camera/image_raw/compressed
+      control_status: /robot_2/control/status
+      path: /robot_2/plan
+      manual_velocity: /robot_2/control/manual_velocity
+      initial_pose: /robot_2/initialpose
+    services:
+      control_command: /robot_2/control/command
+      control_command_type: pinky_control_interfaces/srv/ControlCommand
+      control_available: false
+      follow_command: /robot_2/follow/command
+      follow_command_type: pinky_control_interfaces/srv/FollowCommand
+      follow_available: false
+    camera:
+      throttle_rate_ms: 100
+      fragment_size: 65536

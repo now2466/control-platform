@@ -62,6 +62,7 @@ class FormationMode(StrEnum):
     UNPAIRED = "UNPAIRED"
     READY = "READY"
     FOLLOWING = "FOLLOWING"
+    PAUSING = "PAUSING"
     PAUSED = "PAUSED"
     LOST = "LOST"
     REJOINING = "REJOINING"
@@ -302,6 +303,44 @@ class MockScenario(StrEnum):
     COMMAND_REJECTED = "command_rejected"
 
 
+class CameraQuality(StrEnum):
+    LOW = "low"
+    DEFAULT = "default"
+    HIGH = "high"
+
+
+class ActiveSettings(BaseModel):
+    """The single, currently active dashboard configuration.
+
+    These limits are deliberately below the generic mock teleoperation limits.
+    Hardware limits remain a ROS-adapter concern in T12.
+    """
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(ge=1)
+    active_map_id: str = Field(min_length=1, max_length=128)
+    follow_distance_m: float = Field(ge=0.5, le=2.0)
+    follow_tolerance_m: float = Field(ge=0.05, le=0.5)
+    max_linear_mps: float = Field(gt=0, le=1.0)
+    max_angular_rps: float = Field(gt=0, le=2.0)
+    camera_quality: CameraQuality = CameraQuality.DEFAULT
+
+    @model_validator(mode="after")
+    def finite_values(self) -> "ActiveSettings":
+        for value in (self.follow_distance_m, self.follow_tolerance_m, self.max_linear_mps, self.max_angular_rps):
+            _finite(value)
+        return self
+
+
+class SettingsUpdate(ActiveSettings):
+    request_id: UUID
+
+
+class InitialPoseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    pose: Pose
+
+
 class MockScenarioRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scenario: MockScenario
@@ -355,7 +394,7 @@ class StateSnapshot(BaseModel):
     robots: list[RobotState] = Field(min_length=2, max_length=2)
     formation: FormationState
     active_mission: None = None
-    active_alerts: list[object] = Field(default_factory=list)
+    active_alerts: list[Alert] = Field(default_factory=list)
     mode: Literal["mock", "ros"]
     seq: int = Field(ge=0)
     server_time: datetime

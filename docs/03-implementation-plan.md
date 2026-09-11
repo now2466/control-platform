@@ -11,7 +11,7 @@
 - 모든 제어는 서버에서 대상 ID, 권한, lease, 상태, 값 범위를 검증한다.
 - ROS 이름은 설정으로 매핑한다. mock은 ROS 없이 실행하며 ros 모드 장애를 mock으로 숨기지 않는다.
 - UI에 작업 중/완료/실패를 명시한다. 실제 수신 확인 없는 성공 표시는 금지한다.
-- T01~T14 전체가 최종 범위다. MVP 이후 작업을 누락하지 않는다.
+- T01~T10과 T12~T14가 최종 범위다. T11 영상 기록·동기 재생은 사용자 결정으로 제외한다.
 - 테스트는 위험한 상태 전이·좌표·중복 명령·끊김·기록 경계를 중심으로 작성한다.
 - 기존 웹 서버는 참고만 하고 새 패키지에서 구현한다. 하드웨어 드라이버 변경은 T12에서 실제 연결 조사 후 필요한 범위만 수행한다.
 
@@ -34,7 +34,7 @@ backend/
     adapters/base.py, adapters/mock.py, adapters/ros.py
     state_store.py, command_service.py, formation_service.py
     mission_service.py, safety_service.py, alert_service.py
-    camera_service.py, recording_service.py, replay_service.py
+    camera_service.py
     settings_service.py, map_service.py, accessory_service.py
     auth.py, storage.py, migrations/001_initial.sql
     api/session.py, api/state.py, api/control.py, api/missions.py
@@ -54,9 +54,9 @@ frontend/
   src/features/control/StopBar.tsx, TeleopPanel.tsx
   src/features/missions/MissionPanel.tsx
   src/features/alerts/AlertList.tsx
-  src/features/history/HistoryPage.tsx, ReplayPage.tsx
+  src/features/history/HistoryPage.tsx
   src/features/settings/SettingsPage.tsx
-  tests/dashboard.spec.ts, safety.spec.ts, missions.spec.ts, replay.spec.ts
+  tests/dashboard.spec.ts, safety.spec.ts, missions.spec.ts
 deployment/
   control-center.service, reverse-proxy.conf, env.example
 docs/
@@ -143,23 +143,23 @@ class RobotAdapter(Protocol):
 
 파일: formation_service.py, mission_service.py, api/missions.py, FormationPanel.tsx, MissionPanel.tsx, test_formation.py, test_missions.py, missions.spec.ts.
 
-- [ ] 명세 상태 전이를 표 기반으로 구현하고 불가능한 전이를 409로 거부한다.
-- [ ] pair → 추종 준비 → 마스터 목표 순서를 보장한다. 슬레이브 준비 거절 시 마스터 goal 전송 0회를 검증한다.
-- [ ] 목표 미리보기·진행·도착, 간격·방위각, 이탈·재합류와 일시정지를 구현한다.
-- [ ] 마스터만 도착했을 때 임무 성공을 보류하고 슬레이브 최종 정지 확인/10초 제한을 적용한다.
+- [x] 명세 상태 전이를 표 기반으로 구현하고 불가능한 전이를 409로 거부한다.
+- [x] pair → 추종 준비 → 마스터 목표 순서를 보장한다. 슬레이브 준비 거절 시 마스터 goal 전송 0회를 검증한다.
+- [x] 목표 미리보기·진행·도착, 간격·방위각, 이탈·재합류와 일시정지를 구현한다.
+- [x] 마스터만 도착했을 때 임무 성공을 보류하고 슬레이브 최종 정지 확인/10초 제한을 적용한다.
 
-검증: test_formation.py/test_missions.py 및 missions.spec.ts. 정상·거절·이탈·재합류 실패를 각각 재현한다.
+검증: backend 56 tests, frontend 33 tests와 production build. pair/거절/이탈·재합류 실패/일시정지와 단일 목표 임무의 create → validate → start 흐름을 mock adapter와 DOM/API 테스트로 재현한다. 실제 ROS action·TF·정지 연동은 T12에서 검증한다.
 
 ### T07 — 경유점·순찰 (R07)
 
 파일: mission_service.py, MissionPanel.tsx, test_missions.py, missions.spec.ts.
 
-- [ ] 1~100개 경유점, 반복 횟수, 편집/저장/정렬과 현재 지점·회차를 구현한다.
-- [ ] pause에서 진행 지점 저장, resume에서 해당 지점 재목표화, cancel에서 양쪽 정지 확인을 구현한다.
-- [ ] 3지점×2회 경로의 목표 호출 순서와 실패 시 다음 지점 미전송을 검증한다.
-- [ ] 서버 재시작 후 PAUSED 복구와 자동 주행 금지를 검증한다.
+- [x] 1~100개 경유점, 반복 횟수, 편집/저장/정렬과 현재 지점·회차를 구현한다.
+- [x] pause에서 진행 지점 저장, resume에서 해당 지점 재목표화, cancel에서 양쪽 정지 확인을 구현한다.
+- [x] 3지점×2회 경로의 목표 호출 순서와 실패 시 다음 지점 미전송을 검증한다.
+- [x] 서버 재시작 후 PAUSED 복구와 자동 주행 금지를 검증한다.
 
-검증: test_missions.py 및 missions.spec.ts에 순찰·재시작 시나리오를 추가한다.
+검증: backend 66 tests, frontend 43 tests와 production build. 3지점×2회 순찰, 중간 거절 보호 정지, pause/resume 지점 보존, 재시작 PAUSED/no-auto, 목록·편집·복구 UI를 실제 API·mock adapter·DOM 테스트로 검증한다.
 
 ### T08 — 알림·센서 상세 (R11, R12)
 
@@ -172,38 +172,34 @@ class RobotAdapter(Protocol):
 
 검증: `python -m pytest backend/tests/test_alerts.py -q`, 지도 레이어 선택·로봇 전환 화면 테스트.
 
-### T09 — 설정·지도 관리·식별 장치 (R15~R17)
+### T09 — 설정·정적 지도·초기 위치 (축소 범위)
 
-파일: settings_service.py, map_service.py, accessory_service.py, api/settings.py, SettingsPage.tsx, test_settings.py.
+파일: settings_service.py, map_service.py, api/settings.py, SettingsPage.tsx, test_t09_settings.py.
 
-- [ ] 범위·설정 버전 충돌, 양쪽 적용 결과, 실패 시 이전 활성 설정 유지를 구현한다.
-- [ ] 정지 중 초기 위치 설정, 지도 선택/저장/리셋을 구현한다. 지도 변경 시 이전 목표/경로·편대 연결은 무효화한다.
-- [ ] 기존 SetLed/SetLamp 및 감정 서비스 정의를 읽어 장치별 입력 모델을 만들고 미지원 capabilities를 UI에 반영한다.
-- [ ] 이동 중 역할/지도/추종 제한 변경 거부와 모의 부분 적용 실패를 검증한다.
+- [x] 추종 거리·허용 오차, 최대 선/각속도, 카메라 품질의 범위와 설정 version 충돌(409), mock 적용 실패 시 이전 활성 설정 유지를 구현한다.
+- [x] 정지·편대 해제 상태에서만 선택 로봇 초기 위치를 접수하고 request_id 중복 실행을 막는다.
+- [x] 두 정적 mock 지도 중 활성 지도를 선택·저장하고, 이동·활성 편대/임무 중 지도 변경을 거부한다.
+- [x] ADMIN 전용 설정 화면과 GET/PUT·초기 위치 API를 제공한다.
 
-검증: `python -m pytest backend/tests/test_settings.py -q` 및 frontend 설정 화면 입력 경계 테스트.
+SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환 및 실제 ROS 설정 적용은 이 축소 범위에서 제외하며 T12의 실제 계약 확인 후 다룬다.
 
-### T10 — 기록·이력·내보내기 (R13, N10, N11)
+검증: `python -m pytest backend/tests/test_t09_settings.py -q`, 전체 backend/frontend test 및 frontend production build.
 
-파일: storage.py, api/history.py, HistoryPage.tsx, test_history.py.
+### T10 — 기록·이력·내보내기 (R13, N10, N11) — 구현 완료
 
-- [ ] 5Hz telemetry, 명령·결과·이벤트·알림 저장과 인덱스를 구현한다.
-- [ ] 로봇/임무/시간 필터와 cursor 페이지, CSV/JSON 다운로드를 구현한다.
-- [ ] UTC 저장·KST 표시, CSV 셀 수식 시작 문자 무해화, 24시간 export 제한을 검증한다.
-- [ ] 저장 실패는 경고·기록 장애 상태로 노출하고 정지 실행이 DB 실패에 막히지 않게 한다. 정지 감사 이벤트는 복구 후 보충한다.
+파일: storage.py, api/history.py, HistoryPanel.tsx, test_t10_history.py.
 
-검증: `python -m pytest backend/tests/test_history.py -q`. 임무 생성부터 취소까지 request_id로 결과를 추적할 수 있어야 한다.
+- [x] 명령·결과·임무·편대·알림·설정 이벤트와 필요한 인덱스를 저장한다. 5Hz telemetry는 저장하지 않는다.
+- [x] robot/mission/UTC/event type/cursor 필터와 JSON 다운로드를 제공한다. CSV는 제외한다.
+- [x] UTC 저장과 KST 화면 표시, 기본 24시간·최대 30일 export window를 검증한다.
+- [x] SQLite 30일 운용 이벤트와 owner-scoped event/robot/mission/UTC/cursor 조회, JSON export를 제공한다. 고속 telemetry·Scan/costmap·path·camera frame과 CSV/분석은 저장하지 않는다.
+- [x] 감사 write 실패는 `audit history degraded` 로그만 남기며 adapter 보호 정지와 제어 실행을 막지 않는다.
 
-### T11 — 영상 기록·동기 재생 (R14, N10)
+검증: `cd backend && .venv/bin/python -m pytest tests/test_t10_history.py -q`, 전체 backend/frontend test 및 frontend production build.
 
-파일: recording_service.py, replay_service.py, api/history.py, ReplayPage.tsx, test_history.py, replay.spec.ts.
+### T11 — 영상 기록·동기 재생 — 범위 제외
 
-- [ ] opt-in 녹화 5FPS, 파일/DB 인덱스, 7일/10GB 한도와 2GB 잔여 기준을 구현한다.
-- [ ] 공통 received_at 시간축, 프레임 500ms 공백·위치 1초 공백, 재생 배속·탐색을 구현한다.
-- [ ] 미녹화·삭제된 구간을 오류 없이 표시하고 파일 유실을 경고한다.
-- [ ] 재생 조작에서 실물 명령 API가 호출되지 않는 것을 spy로 검증한다. 별도 LIVE 긴급정지만 명시적 대상으로 허용한다.
-
-검증: test_history.py 및 `npx playwright test tests/replay.spec.ts`. 두 로봇 서로 다른 프레임 시각으로 정렬 정확성을 확인한다.
+2026-09-11 사용자 결정으로 제외했다. T04 실시간 카메라 그리드, FPS·프레임 경과·중단·재연결 표시는 유지한다. 녹화 파일, 프레임 DB, 보존 용량 정책과 동기 재생 화면/API는 구현하지 않는다.
 
 ### T12 — 로봇별 rosbridge·ROS 2 인터페이스 연동 (전체 기능의 실물 기반)
 
@@ -225,24 +221,24 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 
 실물 전제 미충족 시 mock 완료와 ROS 구현 완료를 구별해 보고하고 integration-report.md에 정확한 누락 계약과 담당을 남긴다.
 
-### T13 — 배포·실행 문서 (N05, N09)
+### T13 — 배포·실행 문서 (N05, N09) — 부분 완료
 
 파일: deployment 전체, runbook.md, launch/control_center.launch.py.
 
-- [ ] 동일 출처 정적 UI/API/WS 프록시, TLS·세션 설정, worker 1개 서비스와 env 예제를 작성한다.
-- [ ] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 실제 확인한 값으로 적는다.
-- [ ] 자동 시작은 관찰 모드로 제한하고 server restart가 임무 재개를 유발하지 않는지 검사한다.
-- [ ] 설정 오류/포트 충돌/ROS 미기동은 명확한 메시지로 실패시키고 기본값으로 다른 로봇에 연결하지 않는다.
+- [x] 동일 출처 정적 UI/API/WS 프록시, TLS·세션 설정, worker 1개 서비스와 env 예제를 작성한다.
+- [x] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 적는다. 실제 ROS/Gazebo 실행은 현장 gate로 남긴다.
+- [x] API 자동 시작과 server restart 후 자동 임무 재개 금지를 런북·mock 계약으로 명시한다. rosbridge lifecycle은 별도 ROS supervisor가 맡는다.
+- [x] 설정 오류/포트 충돌/ROS 미기동을 명확한 실패로 처리하고 고정 domain/별도 endpoint를 검증한다.
 
 검증: 새 환경에서 runbook만 따라 mock 실행, 실제 ROS 환경에서 ros 기동. 인증 없는 REST/영상/WS 접근 거부 확인.
 
-### T14 — 통합 인수·성능·현장 시험 (N01~N11)
+### T14 — 통합 인수·성능·현장 시험 (N01~N11) — 부분 완료
 
 파일: acceptance-report.md, 기존 테스트 확장.
 
-- [ ] 아래 인수 시나리오를 mock에서 전부 실행하고 실물 가능 항목을 현장 담당과 수행한다.
-- [ ] 지도+영상 2개+기록 동시 부하로 p95/실제 FPS/메모리/큐·디스크를 측정한다.
-- [ ] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 표로 작성한다.
+- [x] mock에서 실행 가능한 인수 시나리오를 `backend/tests/test_t14_acceptance.py`와 `acceptance.sh`로 실행한다. ROS/Gazebo·실물 항목은 NOT_RUN으로 기록한다.
+- [ ] 지도+실시간 영상 2개 동시 부하로 p95/실제 FPS/메모리/큐를 측정한다.
+- [x] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 `acceptance-report.md`에 기록한다.
 - [ ] 실패 항목을 수정한 후 해당 검증을 재실행한다. 하드웨어 미검증은 NOT_RUN으로 남긴다.
 
 ## 5. 인수 시나리오
@@ -260,9 +256,9 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 | A09 | 3지점 2회 순찰·일시정지·재개 | 순서/회차 일치, 중간 실패를 성공으로 건너뛰지 않음 |
 | A10 | 위치 stale, 배터리 정상 5초 주기 | 위치만 stale, 배터리 잘못된 오프라인 판정 없음 |
 | A11 | 지도 원점 회전·확대 후 클릭 | world 목표 좌표 정확, 지도/카메라 로봇 선택 일치 |
-| A12 | 이력 필터·녹화 재생·공백 탐색 | 이벤트·두 궤적·영상 정렬, 공백 표시, 실물 명령 없음 |
+| A12 | 이력 필터·JSON/CSV 내보내기 | 명령·임무·알림을 조건에 맞게 조회하고 안전하게 내보냄 |
 | A13 | 다른 사용자 제어·관찰자 POST | 제어권 충돌 409/권한 403, 운영자 긴급정지는 허용 |
-| A14 | 서버 재시작·디스크 부족 | 임무 PAUSED, 자동 출발 없음, 기록 중단 경고, 정지 경로 유지 |
+| A14 | 서버 재시작·DB 저장 장애 | 임무 PAUSED, 자동 출발 없음, 기록 장애 경고, 정지 경로 유지 |
 | A15 | 두 namespace와 TF·실제 카메라 확인 | 데이터/명령 교차 없음, 공통 좌표 기반 간격 |
 | A16 | 지도/설정/LED 변경·미지원 서비스 | 정지 조건·버전 검사, 수락과 완료 구별, 미지원 표시 |
 
@@ -276,7 +272,7 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 |---|---|---|---|
 | 기반·화면 | T01~T04 | 5~7일 | 두 로봇 모의 지도·영상 대시보드 |
 | 제어·임무 | T05~T07 | 5~8일 | 정지·추종·단일/순찰 임무 |
-| 운영 기능 | T08~T11 | 6~9일 | 알림·설정·이력·동기 재생 |
+| 운영 기능 | T08~T10 | 4~6일 | 알림·설정·운용 이력 |
 | 실물·배포·인수 | T12~T14 | 7~11일 | 연동 보고서·실행 문서·인수 결과 |
 
 T12의 인터페이스 조사는 T01 직후 시작해 로봇 담당에게 계약을 전달할 수 있다. 본격 ROS 연동은 mock 제어 검증 후 수행한다. MVP는 T01~T06, T08의 핵심 알림 및 T12의 해당 실물 연동을 통과한 상태이며, 전체 범위 완료와 구분한다.
@@ -290,15 +286,15 @@ T12의 인터페이스 조사는 T01 직후 시작해 로봇 담당에게 계약
 | R09/R10/R18 | T02/T05/T12 |
 | R11/R12 | T08/T12 |
 | R13 | T10 |
-| R14 | T11 |
+| R14 | 범위 제외(T11) |
 | R15/R16/R17 | T09/T12 |
 | R19 | T01 및 각 기능 mock 시나리오 |
 | N01/N02/N07/N08 | T03/T04/T14 |
 | N03/N06 | T05/T12/T14 |
 | N04/N05 | T02/T07/T13/T14 |
 | N09 | T02/T13/T14 |
-| N10/N11 | T10/T11/T14 |
+| N10/N11 | T10/T14 |
 
 ## 7. 최종 완료 정의
 
-모든 R/N 항목에 검증 증거가 있고 mock/ROS/실물 결과를 구별해 인수 보고서를 제출한다. 모든 예정 화면·API·설정·테스트·실행 문서를 제공한다. 실물 카메라/추종/정지 계약 미충족을 숨기지 않는다. 남은 항목이 있는 경우 구현 완료 범위와 정확한 외부 의존성을 명시한다.
+범위 제외로 기록한 항목을 뺀 모든 R/N 항목에 검증 증거가 있고 mock/ROS/실물 결과를 구별해 인수 보고서를 제출한다. 모든 예정 화면·API·설정·테스트·실행 문서를 제공한다. 실물 카메라/추종/정지 계약 미충족을 숨기지 않는다. 남은 항목이 있는 경우 구현 완료 범위와 정확한 외부 의존성을 명시한다.

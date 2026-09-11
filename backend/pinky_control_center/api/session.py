@@ -18,8 +18,9 @@ async def login(payload: LoginRequest, request: Request, response: Response) -> 
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="AUTH_REQUIRED")
     token, csrf = request.app.state.storage.create_session(user)
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", secure=False, max_age=8 * 3600)
-    response.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="lax", secure=False, max_age=8 * 3600)
+    secure = bool(getattr(request.app.state, "secure_cookies", False))
+    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", secure=secure, max_age=8 * 3600)
+    response.set_cookie(CSRF_COOKIE, csrf, httponly=False, samesite="lax", secure=secure, max_age=8 * 3600)
     return LoginResponse(user=user, csrf_token=csrf)
 
 
@@ -32,7 +33,8 @@ async def session(user: UserInfo = Depends(current_user)) -> UserInfo:
 async def logout(request: Request, response: Response, user: UserInfo = Depends(current_user)) -> Response:
     verify_mutation(request, user)
     request.app.state.storage.delete_session(request.cookies.get(SESSION_COOKIE))
-    response.delete_cookie(SESSION_COOKIE)
-    response.delete_cookie(CSRF_COOKIE)
+    secure = bool(getattr(request.app.state, "secure_cookies", False))
+    response.delete_cookie(SESSION_COOKIE, secure=secure, samesite="lax")
+    response.delete_cookie(CSRF_COOKIE, secure=secure, samesite="lax")
     response.status_code = 204
     return response
