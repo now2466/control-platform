@@ -33,10 +33,13 @@ deployment/scripts/acceptance.sh
 | robot_1 domain 12 / bridge 9090 | NOT_RUN | rosbridge 로그, `ros2 topic list`, 연결 상태 |
 | robot_2 domain 13 / bridge 9091 | NOT_RUN | rosbridge 로그, `ros2 topic list`, 연결 상태 |
 | 두 namespace의 TF 경로와 공통 map 좌표 | NOT_RUN | `tf2_tools view_frames`, 시간 동기 상태 |
-| compressed camera 두 스트림·실제 FPS/p95 | NOT_RUN | 10분 측정 CSV/스크린샷 |
+| compressed camera topic 매핑·두 스트림·실제 FPS/p95 | NOT_RUN | 실제 `CompressedImage` topic/변환 확인, 10분 측정 CSV/스크린샷 |
 | control/follow 수락·결과·재연결 | NOT_RUN | command_id 로그와 adapter contract test |
 | stop latch·watchdog·최종 cmd_vel 단일 중재 | NOT_RUN | 로봇 측 출력 0 및 래치 증거 |
 | Gazebo 무이동 상태→개별/전체 정지 | NOT_RUN | rosbag/로그, command 결과 |
+| 두 Gazebo 인스턴스 spawn 위치 분리 | NOT_RUN | x/y spawn 인자를 지원하는 별도 world 또는 launch 수정. 현재 기본 위치 중첩 가능 |
 | 1시간 지도+영상 RSS/큐/N01~N03 | NOT_RUN | 측정값, 호스트 사양, 시계 동기 상태 |
 
 실물에서 제공되지 않은 follow/control 서비스는 `UNSUPPORTED`로 표시하며 PASS로 대체하지 않는다. 서버 재시작 뒤 자동 주행 재개가 관찰되면 즉시 FAIL로 기록하고 임무를 재개하지 않은 상태에서 원인을 수정한다.
+
+rosbridge는 systemd API 서비스와 별도 lifecycle이다. ROS supervisor가 종료·재시작을 관리하며, API 서비스만 재시작해도 rosbridge가 자동으로 생긴다고 가정하지 않는다.

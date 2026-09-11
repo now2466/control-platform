@@ -221,24 +221,24 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 
 실물 전제 미충족 시 mock 완료와 ROS 구현 완료를 구별해 보고하고 integration-report.md에 정확한 누락 계약과 담당을 남긴다.
 
-### T13 — 배포·실행 문서 (N05, N09)
+### T13 — 배포·실행 문서 (N05, N09) — 부분 완료
 
 파일: deployment 전체, runbook.md, launch/control_center.launch.py.
 
-- [ ] 동일 출처 정적 UI/API/WS 프록시, TLS·세션 설정, worker 1개 서비스와 env 예제를 작성한다.
-- [ ] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 실제 확인한 값으로 적는다.
-- [ ] 자동 시작은 관찰 모드로 제한하고 server restart가 임무 재개를 유발하지 않는지 검사한다.
-- [ ] 설정 오류/포트 충돌/ROS 미기동은 명확한 메시지로 실패시키고 기본값으로 다른 로봇에 연결하지 않는다.
+- [x] 동일 출처 정적 UI/API/WS 프록시, TLS·세션 설정, worker 1개 서비스와 env 예제를 작성한다.
+- [x] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 적는다. 실제 ROS/Gazebo 실행은 현장 gate로 남긴다.
+- [x] API 자동 시작과 server restart 후 자동 임무 재개 금지를 런북·mock 계약으로 명시한다. rosbridge lifecycle은 별도 ROS supervisor가 맡는다.
+- [x] 설정 오류/포트 충돌/ROS 미기동을 명확한 실패로 처리하고 고정 domain/별도 endpoint를 검증한다.
 
 검증: 새 환경에서 runbook만 따라 mock 실행, 실제 ROS 환경에서 ros 기동. 인증 없는 REST/영상/WS 접근 거부 확인.
 
-### T14 — 통합 인수·성능·현장 시험 (N01~N11)
+### T14 — 통합 인수·성능·현장 시험 (N01~N11) — 부분 완료
 
 파일: acceptance-report.md, 기존 테스트 확장.
 
-- [ ] 아래 인수 시나리오를 mock에서 전부 실행하고 실물 가능 항목을 현장 담당과 수행한다.
+- [x] mock에서 실행 가능한 인수 시나리오를 `backend/tests/test_t14_acceptance.py`와 `acceptance.sh`로 실행한다. ROS/Gazebo·실물 항목은 NOT_RUN으로 기록한다.
 - [ ] 지도+실시간 영상 2개 동시 부하로 p95/실제 FPS/메모리/큐를 측정한다.
-- [ ] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 표로 작성한다.
+- [x] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 `acceptance-report.md`에 기록한다.
 - [ ] 실패 항목을 수정한 후 해당 검증을 재실행한다. 하드웨어 미검증은 NOT_RUN으로 남긴다.
 
 ## 5. 인수 시나리오

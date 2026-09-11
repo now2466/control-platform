@@ -86,7 +86,7 @@ sudo systemctl start pinky-control-center
 
 ## 5. ROS/Gazebo 인수 준비
 
-T12 ROS 어댑터가 설치된 별도 workspace에서만 수행한다. `/etc/pinky-control-center/robots.ros.yaml`의 실제 주소·매핑을 먼저 확인하고, bridge 두 개는 서로 다른 domain과 포트를 사용한다.
+T12 ROS 어댑터가 설치된 별도 workspace에서만 수행한다. `/etc/pinky-control-center/robots.ros.yaml`의 실제 주소·매핑을 먼저 확인하고, bridge 두 개는 서로 다른 domain과 포트를 사용한다. `pinky-control-center.service`는 API만 관리하며 rosbridge launch의 lifecycle은 별도 ROS supervisor/operator가 관리한다.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -94,13 +94,13 @@ export ROS_DOMAIN_ID=12
 ros2 launch pinky_gz_sim launch_sim.launch.xml namespace:=robot_1 world_name:=pinky_factory.world
 ```
 
-다른 터미널에서 `ROS_DOMAIN_ID=13`으로 `namespace:=robot_2`를 실행하고, 두 인스턴스의 spawn 위치가 겹치지 않게 Gazebo 인자를 지정한다. 그 다음 준비된 launch 파일을 실행한다.
+다른 터미널에서 `ROS_DOMAIN_ID=13`으로 `namespace:=robot_2`를 실행한다. 현재 `pinky_gz_sim/launch/launch_sim.launch.xml`에는 두 인스턴스의 x/y spawn 인자가 없고 기본 spawn 위치가 겹칠 수 있으므로, 별도 world 또는 launch 수정으로 위치를 분리하기 전에는 dual-robot Gazebo 인수를 실행하지 않는다. 이 제한은 acceptance report에서 NOT_RUN으로 남긴다. 그 다음 준비된 rosbridge-only launch를 실행한다.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-ros2 launch deployment/launch/control_center.launch.py
+python3 deployment/launch/control_center.launch.py
 ```
 
-이 launch는 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, compressed camera, `/tf`·`/tf_static`를 각각 확인하고, `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 다음 단계로 간다. control/follow 인터페이스, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
+이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. compressed camera topic은 현재 raw camera 조사 결과만 있어 설정 후보가 미검증 상태이며, 실제 `CompressedImage` 발행 또는 변환 bridge를 확인하기 전에는 PASS로 기록하지 않는다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 다음 단계로 간다. control/follow 인터페이스, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
 
 검증 순서는 무이동 상태의 상태 수신 → 카메라 → 개별 정지 → 전체 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.

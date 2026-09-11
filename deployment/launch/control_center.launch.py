@@ -25,3 +25,14 @@ def generate_launch_description() -> LaunchDescription:
             name="rosbridge_robot_2",
         ),
     ])
+
+
+if __name__ == "__main__":
+    # ``ros2 launch`` accepts package launch files, while this repository's
+    # deployment directory is deliberately not a ROS package.  Running the
+    # Python launch file directly is therefore the portable invocation.
+    from launch import LaunchService
+
+    service = LaunchService()
+    service.include_launch_description(generate_launch_description())
+    raise SystemExit(service.run())
