@@ -12,6 +12,7 @@ dependencies = [
   "pillow==11.0.0",
   "pydantic==2.10.4",
   "uvicorn[standard]==0.34.0",
+  "websockets==17.1",
 ]
 
 [project.optional-dependencies]

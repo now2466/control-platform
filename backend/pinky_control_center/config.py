@@ -111,6 +111,15 @@ class RosbridgeConfig(BaseModel):
         slave = by_id["robot_2"]
         if not slave.services.follow_command or not slave.services.follow_command_type:
             raise ValueError("robot_2 requires a follow command service mapping")
+        for robot in self.robots:
+            endpoints = [
+                robot.topics.odom, robot.topics.battery_percent, robot.topics.battery_voltage,
+                robot.topics.camera_compressed, robot.topics.control_status, robot.topics.path,
+                robot.topics.manual_velocity, robot.topics.initial_pose, robot.services.control_command,
+                robot.services.follow_command,
+            ]
+            if any(endpoint is not None and not endpoint.startswith(robot.namespace + "/") for endpoint in endpoints):
+                raise ValueError(f"all {robot.robot_id} ROS mappings must stay under {robot.namespace}")
         return self
 
 

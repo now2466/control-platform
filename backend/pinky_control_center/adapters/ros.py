@@ -14,7 +14,8 @@ import json
 import math
 import time
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any, Literal
 from uuid import uuid4
@@ -31,6 +32,25 @@ from pinky_control_center.models import (
 
 RobotId = Literal["robot_1", "robot_2"]
 _RECONNECT_DELAYS = (1, 2, 4, 8)
+_MAX_FRAGMENT_COUNT = 64
+_MAX_FRAGMENT_BYTES = 4 * 1024 * 1024
+_FRAGMENT_TTL_SECONDS = 5.0
+
+
+@dataclass
+class _FragmentBuffer:
+    total: int
+    created_at: float
+    chunks: dict[int, str]
+    byte_count: int = 0
+
+
+@dataclass
+class _PendingServiceCall:
+    robot_id: RobotId
+    socket: Any
+    command: CommandRequest
+    future: asyncio.Future[CommandAcceptance]
 
 
 class RosbridgeAdapter:
@@ -60,10 +80,13 @@ class RosbridgeAdapter:
         self._event_queue: asyncio.Queue[AdapterEvent] = asyncio.Queue(maxsize=200)
         self._drained_events: list[AdapterEvent] = []
         self._frames: dict[RobotId, CameraFrame] = {}
-        self._service_calls: dict[str, asyncio.Future[CommandAcceptance]] = {}
+        self._service_calls: dict[str, _PendingServiceCall] = {}
+        self._fragments: dict[RobotId, dict[str, _FragmentBuffer]] = {"robot_1": {}, "robot_2": {}}
         self._states: dict[RobotId, RobotState] = {
             robot_id: self._blank_state(robot) for robot_id, robot in self._by_id.items()
         }
+        self._pose_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
+        self._battery_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
 
     def _blank_state(self, robot: RosbridgeRobotConfig) -> RobotState:
         return RobotState(
@@ -99,9 +122,9 @@ class RosbridgeAdapter:
                 if inspect.isawaitable(result):
                     await result
         self._sockets.clear()
-        for future in self._service_calls.values():
-            if not future.done():
-                future.set_result(CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_CLOSED"))
+        for pending in self._service_calls.values():
+            if not pending.future.done():
+                pending.future.set_result(CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_CLOSED"))
         self._service_calls.clear()
         for robot_id in self._states:
             self._mark_disconnected(robot_id)
@@ -121,12 +144,17 @@ class RosbridgeAdapter:
                 self._sockets[robot_id] = socket
                 self._mark_connected(robot_id)
                 await self._subscribe(robot_id, socket)
-                retry = 0
+                stable_connection = False
                 while self._connected:
                     raw = await socket.recv()
                     if raw is None:
                         raise ConnectionError("rosbridge closed")
-                    await self._handle_raw(robot_id, raw)
+                    received_message = await self._handle_raw(robot_id, raw, socket)
+                    # Do not repeatedly hammer an endpoint that accepts TCP
+                    # and drops us before it carries a rosbridge message.
+                    if received_message and not stable_connection:
+                        stable_connection = True
+                        retry = 0
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -177,6 +205,8 @@ class RosbridgeAdapter:
         })
 
     def _mark_disconnected(self, robot_id: RobotId) -> None:
+        self._frames.pop(robot_id, None)
+        self._fragments[robot_id].clear()
         current = self._states[robot_id]
         self._states[robot_id] = current.model_copy(update={
             "connection": Connection.OFFLINE, "received_at": None,
@@ -185,27 +215,73 @@ class RosbridgeAdapter:
             "sensors": [SensorStatus(name="camera", state=SensorState.STALE)],
         })
 
-    async def _handle_raw(self, robot_id: RobotId, raw: str | bytes) -> None:
+    async def _handle_raw(self, robot_id: RobotId, raw: str | bytes, socket: Any | None = None) -> bool:
         try:
             payload = json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return
+            return False
         if not isinstance(payload, dict):
-            return
+            return False
+        if payload.get("op") == "fragment":
+            reassembled = self._accept_fragment(robot_id, payload)
+            if reassembled is not None:
+                return await self._handle_raw(robot_id, reassembled, socket)
+            return False
         if payload.get("op") == "service_response":
-            self._complete_service_call(payload)
-            return
+            await self._complete_service_call(robot_id, socket, payload)
+            return True
         if payload.get("op") != "publish" or not isinstance(payload.get("topic"), str) or not isinstance(payload.get("msg"), dict):
-            return
+            return False
         await self.handle_publish(robot_id, payload["topic"], payload["msg"])
+        return True
 
-    def _complete_service_call(self, payload: dict[str, object]) -> None:
+    def _accept_fragment(self, robot_id: RobotId, payload: dict[str, object]) -> str | None:
+        """Safely retain only a small, short-lived rosbridge fragment set."""
+        buffers = self._fragments[robot_id]
+        now = time.monotonic()
+        for fragment_id, buffer in list(buffers.items()):
+            if now - buffer.created_at > _FRAGMENT_TTL_SECONDS:
+                del buffers[fragment_id]
+        fragment_id, number, total, data = payload.get("id"), payload.get("num"), payload.get("total"), payload.get("data")
+        if not isinstance(fragment_id, str) or not fragment_id or len(fragment_id) > 128:
+            return None
+        if isinstance(number, bool) or not isinstance(number, int) or isinstance(total, bool) or not isinstance(total, int):
+            return None
+        if not isinstance(data, str) or total < 1 or total > _MAX_FRAGMENT_COUNT or number < 0 or number >= total:
+            buffers.pop(fragment_id, None)
+            return None
+        buffer = buffers.get(fragment_id)
+        if buffer is None:
+            buffer = _FragmentBuffer(total=total, created_at=now, chunks={})
+            buffers[fragment_id] = buffer
+        elif buffer.total != total:
+            del buffers[fragment_id]
+            return None
+        previous = buffer.chunks.get(number)
+        size = len(data.encode("utf-8"))
+        next_size = buffer.byte_count - (len(previous.encode("utf-8")) if previous is not None else 0) + size
+        if next_size > _MAX_FRAGMENT_BYTES:
+            del buffers[fragment_id]
+            return None
+        buffer.chunks[number] = data
+        buffer.byte_count = next_size
+        if len(buffer.chunks) != total:
+            return None
+        try:
+            reassembled = "".join(buffer.chunks[index] for index in range(total))
+        except KeyError:
+            return None
+        del buffers[fragment_id]
+        return reassembled
+
+    async def _complete_service_call(self, robot_id: RobotId, socket: Any | None, payload: dict[str, object]) -> None:
         call_id = payload.get("id")
         if not isinstance(call_id, str):
             return
-        future = self._service_calls.pop(call_id, None)
-        if future is None or future.done():
+        pending = self._service_calls.get(call_id)
+        if pending is None or pending.robot_id != robot_id or pending.socket is not socket or pending.future.done():
             return
+        self._service_calls.pop(call_id, None)
         values = payload.get("values")
         accepted = bool(payload.get("result", False))
         reason: str | None = None
@@ -213,7 +289,15 @@ class RosbridgeAdapter:
             accepted = bool(values.get("accepted", accepted))
             value_reason = values.get("reason_code")
             reason = value_reason if isinstance(value_reason, str) else None
-        future.set_result(CommandAcceptance(accepted=accepted, reason_code=reason if not accepted else None))
+        result = CommandAcceptance(accepted=accepted, reason_code=reason if not accepted else None)
+        pending.future.set_result(result)
+        await self._emit("command", robot_id, {
+            "command_id": str(pending.command.command_id),
+            "state": "SUCCEEDED" if result.accepted else "REJECTED",
+            "reason_code": result.reason_code,
+            "operation": pending.command.operation,
+            "parameters": pending.command.parameters,
+        }, self._clock())
 
     async def handle_publish(self, robot_id: RobotId, topic: str, message: dict[str, object]) -> None:
         """Public protocol seam used by contract tests and rosbridge readers."""
@@ -254,6 +338,7 @@ class RosbridgeAdapter:
             "angular_rps": _number(angular.get("z")), "tf_valid": False,
             "tf_reason_code": "MAP_TF_UNVERIFIED",
         })
+        self._pose_received_at[robot_id] = now
 
     def _update_battery(self, robot_id: RobotId, topic: str, message: dict[str, object], now: datetime) -> None:
         value = _number(message.get("data"))
@@ -265,6 +350,7 @@ class RosbridgeAdapter:
         else:
             updates["voltage_v"] = max(0.0, value)
         self._states[robot_id] = self._states[robot_id].model_copy(update=updates)
+        self._battery_received_at[robot_id] = now
 
     def _update_control_status(self, robot_id: RobotId, message: dict[str, object], now: datetime) -> None:
         current = self._states[robot_id]
@@ -325,14 +411,30 @@ class RosbridgeAdapter:
 
     def snapshot(self) -> StateSnapshot:
         now = self._clock()
+        robots = [self._freshness_state(robot_id, now) for robot_id in ("robot_1", "robot_2")]
         return StateSnapshot(
-            robots=[self._states["robot_1"], self._states["robot_2"]],
+            robots=robots,
             formation=FormationState(state=FormationMode.UNPAIRED, master_id="robot_1", slave_id="robot_2", target_distance_m=0.8),
             mode="ros", seq=0, server_time=now, map_id="unknown",
         )
 
     def frame(self, robot_id: str) -> CameraFrame | None:
         return self._frames.get(robot_id) if robot_id in self._by_id else None
+
+    def sensor_layers(self, robot_id: str) -> dict[str, object]:
+        """Do not turn an unimplemented ROS overlay into an API 500."""
+        if robot_id not in self._by_id:
+            raise ValueError("unknown robot")
+        state = self._states[robot_id]
+        unavailable = "STALE" if state.connection is not Connection.ONLINE else "UNSUPPORTED"
+        return {
+            "robot_id": robot_id,
+            "scan": {"state": unavailable, "rays": []},
+            "costmaps": [
+                {"name": "local_costmap", "state": unavailable, "cells": []},
+                {"name": "global_costmap", "state": unavailable, "cells": []},
+            ],
+        }
 
     def drain_events(self) -> list[AdapterEvent]:
         events, self._drained_events = self._drained_events, []
@@ -371,7 +473,7 @@ class RosbridgeAdapter:
             endpoint, service_type = service.control_command, service.control_command_type
         call_id = f"cc:{command.command_id}:{robot_id}"
         future: asyncio.Future[CommandAcceptance] = asyncio.get_running_loop().create_future()
-        self._service_calls[call_id] = future
+        self._service_calls[call_id] = _PendingServiceCall(robot_id=robot_id, socket=socket, command=command, future=future)
         request = {
             "op": "call_service", "id": call_id, "service": endpoint,
             "type": service_type,
@@ -391,6 +493,13 @@ class RosbridgeAdapter:
         """ROS parameter/settings application has no confirmed T12 contract yet."""
         return False
 
+    def _freshness_state(self, robot_id: RobotId, now: datetime) -> RobotState:
+        current = self._states[robot_id]
+        pose_at, battery_at = self._pose_received_at[robot_id], self._battery_received_at[robot_id]
+        pose_freshness = _freshness(pose_at, now, 1.0)
+        battery_freshness = _freshness(battery_at, now, 15.0)
+        return current.model_copy(update={"pose_freshness": pose_freshness, "battery_freshness": battery_freshness})
+
 
 def _nested_dict(value: object, *keys: str) -> dict[str, object]:
     current = value
@@ -407,6 +516,12 @@ def _number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return result if math.isfinite(result) else None
+
+
+def _freshness(received_at: datetime | None, now: datetime, max_age_seconds: float) -> Freshness:
+    if received_at is None:
+        return Freshness.UNKNOWN
+    return Freshness.FRESH if now - received_at <= timedelta(seconds=max_age_seconds) else Freshness.STALE
 
 
 def _yaw(orientation: dict[str, object]) -> float:
