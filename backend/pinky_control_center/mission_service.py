@@ -28,6 +28,31 @@ class MissionService:
         if mission_id == self.active_id and self.slave_wait_deadline is None:
             self.slave_wait_deadline = self.clock() + 10.0
 
+    async def protective_pause(self, reason: str) -> None:
+        """Pause an active formation once for an alert that invalidates safe motion."""
+        current = self.formation()
+        if current.state not in {FormationMode.FOLLOWING, FormationMode.LOST, FormationMode.PAUSING} and self.active_id is None:
+            return
+        if self.formation_pause_pending is not None:
+            return
+        master, slave = current.master_id, current.slave_id
+        if self.active_id:
+            row = self.storage.connection.execute("SELECT payload_json FROM missions WHERE id=?", (self.active_id,)).fetchone()
+            if row:
+                import json
+                mission = json.loads(row["payload_json"])
+                if mission["state"] in {"RUNNING", "STARTING"}:
+                    mission["state"] = "PAUSING"
+                    mission["failure_code"] = reason
+                    self.storage.update_mission(self.active_id, mission)
+        self._set_formation(FormationMode.LOST if reason == "FOLLOW_LOST" else FormationMode.PAUSING, reason)
+        for robot_id in (master, slave):
+            try:
+                await self.adapter.execute(__import__('pinky_control_center.models', fromlist=['CommandRequest']).CommandRequest(command_id=uuid4(), robot_id=robot_id, operation="stop", parameters={"reason": reason}))
+            except Exception:
+                pass
+        self.formation_pause_pending = (master, slave)
+
     def consume_adapter_event(self, event) -> None:
         """Small adapter-result boundary shared by mock now and ROS event ingestion later."""
         if event.kind != "command" or event.robot_id != "robot_1" or event.payload.get("operation") != "navigate":

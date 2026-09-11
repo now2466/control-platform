@@ -92,6 +92,10 @@ export async function updateMission(id: string, waypoints: Goal[], name: string,
   return response.json() as Promise<Mission>
 }
 
+export async function acknowledgeAlert(alertId: string) {
+  return mutation(`/api/v1/alerts/${alertId}/ack`, {}, '경고 확인 실패') as Promise<{ alert_id: string; code: string; severity: string; state: string; message: string; occurrences: number; robot_id?: string | null; acknowledged_by?: string | null; acknowledged_at?: string | null }>
+}
+
 type CommandResult = { command_id: string; state: string; reason_code?: string | null; error_code?: string | null }
 const terminalCommandStates = new Set(['SUCCEEDED', 'FAILED', 'REJECTED', 'TIMED_OUT', 'CANCELED'])
 const delay = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds))

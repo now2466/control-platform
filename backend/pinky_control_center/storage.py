@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from pinky_control_center.models import ControlLease, UserInfo, UserRole
+from pinky_control_center.models import Alert, AlertState, ControlLease, UserInfo, UserRole
 
 Clock = Callable[[], datetime]
 
@@ -84,6 +84,52 @@ class Storage:
                 sql = resources.files("pinky_control_center").joinpath("migrations", "004_missions.sql").read_text(encoding="utf-8")
                 self.connection.executescript(sql)
                 self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(4, ?)", (_timestamp(self.clock()),))
+            if 5 not in applied:
+                sql = resources.files("pinky_control_center").joinpath("migrations", "005_alerts.sql").read_text(encoding="utf-8")
+                self.connection.executescript(sql)
+                self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(5, ?)", (_timestamp(self.clock()),))
+
+    def upsert_alert(self, alert: Alert) -> Alert:
+        payload = alert.model_dump(mode="json")
+        scope = alert.robot_id or "system"
+        now = _timestamp(self.clock())
+        with self._command_lock, self.connection:
+            self.connection.execute(
+                """INSERT INTO alerts(id,code,scope,robot_id,state,severity,payload_json,acknowledged_at,acknowledged_by,created_at,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(code,scope) DO UPDATE SET state=excluded.state,severity=excluded.severity,payload_json=excluded.payload_json,
+                     acknowledged_at=excluded.acknowledged_at,acknowledged_by=excluded.acknowledged_by,updated_at=excluded.updated_at""",
+                (str(alert.alert_id), alert.code, scope, alert.robot_id, alert.state.value, alert.severity.value, json.dumps(payload),
+                 _timestamp(alert.acknowledged_at) if alert.acknowledged_at else None, alert.acknowledged_by, now, now),
+            )
+        return alert
+
+    def alert(self, alert_id: str) -> Alert | None:
+        row = self.connection.execute("SELECT payload_json FROM alerts WHERE id=?", (alert_id,)).fetchone()
+        return None if row is None else Alert.model_validate(json.loads(row["payload_json"]))
+
+    def alerts(self, *, state: AlertState | None = None, severity: str | None = None, robot_id: str | None = None, limit: int = 100, cursor: int = 0) -> tuple[list[Alert], int | None]:
+        query = "SELECT payload_json FROM alerts WHERE 1=1"
+        args: list[object] = []
+        if state is not None:
+            query += " AND state=?"; args.append(state.value)
+        if severity is not None:
+            query += " AND severity=?"; args.append(severity)
+        if robot_id is not None:
+            query += " AND robot_id=?"; args.append(robot_id)
+        query += " ORDER BY updated_at DESC,id DESC LIMIT ? OFFSET ?"; args.extend((limit + 1, cursor))
+        rows = self.connection.execute(query, args).fetchall()
+        more = len(rows) > limit
+        return [Alert.model_validate(json.loads(row["payload_json"])) for row in rows[:limit]], cursor + limit if more else None
+
+    def acknowledge_alert(self, alert_id: str, username: str) -> Alert | None:
+        alert = self.alert(alert_id)
+        if alert is None:
+            return None
+        if alert.acknowledged_at is None:
+            alert = alert.model_copy(update={"acknowledged_at": self.clock(), "acknowledged_by": username})
+            self.upsert_alert(alert)
+        return alert
 
     def create_mission(self, user: UserInfo, payload: dict[str, object]) -> dict[str, object]:
         mission_id, now = str(uuid4()), _timestamp(self.clock())

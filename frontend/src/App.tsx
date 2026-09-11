@@ -7,10 +7,11 @@ import StopBar from './StopBar'
 import Teleop from './Teleop'
 import FormationPanel from './FormationPanel'
 import MissionPanel from './MissionPanel'
+import AlertList from './AlertList'
 
 type Point = { x: number; y: number }
 type Robot = { robot_id: string; name: string; role: 'MASTER' | 'SLAVE'; connection: string; mode: string; battery_percent: number | null; voltage_v?: number | null; linear_mps?: number | null; angular_rps?: number | null; pose?: { x: number; y: number; yaw: number } | null; pose_freshness?: string; stop_latched: boolean; trail?: Point[]; path?: Point[]; goal?: { x: number; y: number; yaw: number; frame_id: string } | null; tf_valid?: boolean; tf_reason_code?: string | null; received_at?: string | null }
-type State = { robots: Robot[]; mode: string; seq: number; server_time: string; map_id?: string | null; formation?: { state: string; master_id?: string | null; slave_id?: string | null; distance_m: number | null; bearing_rad: number | null; reason_code?: string | null } }
+type State = { robots: Robot[]; mode: string; seq: number; server_time: string; map_id?: string | null; active_alerts?: { alert_id: string; code: string; severity: string; state: string; message: string; occurrences: number; robot_id?: string | null; acknowledged_by?: string | null; acknowledged_at?: string | null }[]; formation?: { state: string; master_id?: string | null; slave_id?: string | null; distance_m: number | null; bearing_rad: number | null; reason_code?: string | null } }
 
 async function getState(): Promise<State> {
   const response = await fetch('/api/v1/state')
@@ -42,6 +43,7 @@ export default function App() {
     {leaseError && <div className="error">{leaseError}</div>}
     {error && <div className="error">{error}. 백엔드를 127.0.0.1:8081에서 실행해 주세요.</div>}
     <MapPanel robots={state?.robots ?? []} selected={selectedRobot} mapId={state?.map_id} onSelect={setSelectedRobot} onGoalChange={setGoal} />
+    <AlertList alerts={state?.active_alerts ?? []} onError={setError} />
     {state?.formation && <p className="formation-readout">편대 거리: {state.formation.distance_m == null ? '— (TF 확인 필요)' : `${state.formation.distance_m.toFixed(2)}m`} · 방위각: {state.formation.bearing_rad == null ? '—' : `${state.formation.bearing_rad.toFixed(2)}rad`}</p>}
     <FormationPanel formation={state?.formation} lease={lease?.lease_id ?? null} onAction={async action => { setError(''); try { await formationAction(action, state?.formation?.master_id ?? 'robot_1', state?.formation?.slave_id ?? 'robot_2', lease?.lease_id ?? '') } catch (reason) { setError((reason as Error).message) } }} />
     <MissionPanel lease={lease?.lease_id ?? null} mapId={state?.map_id} formation={state?.formation} goal={goal} onError={setError} />

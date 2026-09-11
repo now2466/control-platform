@@ -356,7 +356,7 @@ class StateSnapshot(BaseModel):
     robots: list[RobotState] = Field(min_length=2, max_length=2)
     formation: FormationState
     active_mission: None = None
-    active_alerts: list[object] = Field(default_factory=list)
+    active_alerts: list[Alert] = Field(default_factory=list)
     mode: Literal["mock", "ros"]
     seq: int = Field(ge=0)
     server_time: datetime

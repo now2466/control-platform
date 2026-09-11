@@ -120,6 +120,30 @@ class MockRobotAdapter:
         image.save(buffer, format="JPEG", quality=82)
         return CameraFrame(robot_id=robot_id, frame_id=f"mock-{robot_id}-{self._sequence}", captured_at=now, received_at=now, width=640, height=480, jpeg=buffer.getvalue())
 
+    def sensor_layers(self, robot_id: RobotId) -> dict[str, object]:
+        """Small, explicit mock payload for the selected-robot map overlay.
+
+        T12 will replace this with validated LaserScan/Costmap subscriptions;
+        unsupported data remains a first-class state rather than fabricated data.
+        """
+        if robot_id == "robot_2":
+            return {
+                "robot_id": robot_id,
+                "scan": {"state": "STALE" if self._scenario is MockScenario.SLAVE_OFFLINE else "UNSUPPORTED", "rays": []},
+                "costmaps": [
+                    {"name": "local_costmap", "state": "UNSUPPORTED", "cells": []},
+                    {"name": "global_costmap", "state": "UNSUPPORTED", "cells": []},
+                ],
+            }
+        return {
+            "robot_id": robot_id,
+            "scan": {"state": "OK", "rays": [{"angle_rad": angle, "range_m": distance} for angle, distance in ((-1.0, 1.4), (-.45, 2.0), (0.0, 1.1), (.45, 1.8), (1.0, 1.5))]},
+            "costmaps": [
+                {"name": "local_costmap", "state": "OK", "cells": [{"x": 1.8, "y": 2.0, "occupied": True}, {"x": 1.7, "y": 2.1, "occupied": True}]},
+                {"name": "global_costmap", "state": "OK", "cells": [{"x": 2.2, "y": 2.5, "occupied": True}, {"x": 2.3, "y": 2.5, "occupied": True}]},
+            ],
+        }
+
     async def events(self) -> AsyncIterator[AdapterEvent]:
         while self._connected:
             snapshot = self.snapshot()
