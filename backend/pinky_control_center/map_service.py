@@ -13,22 +13,23 @@ class MapService:
     """Provides deterministic mock map metadata and a cacheable occupancy PNG."""
 
     def __init__(self) -> None:
-        config = yaml.safe_load(resources.files("pinky_control_center").joinpath("resources", "maps", "mock_lab.yaml").read_text(encoding="utf-8"))
-        self.map_id = config["map_id"]
-        self.version = config["version"]
-        self._metadata = MapMetadata.model_validate({**config, "data_url": f"/api/v1/maps/{self.map_id}/data"})
+        configs = [yaml.safe_load(resource.read_text(encoding="utf-8")) for resource in sorted(resources.files("pinky_control_center").joinpath("resources", "maps").iterdir(), key=lambda resource: resource.name) if resource.name.endswith(".yaml")]
+        self._metadata = {config["map_id"]: MapMetadata.model_validate({**config, "data_url": f"/api/v1/maps/{config['map_id']}/data"}) for config in configs}
+        self.map_id = "mock_lab"
+        self.version = self._metadata[self.map_id].version
         self._png = self._make_png()
 
     def summaries(self) -> list[MapSummary]:
-        return [MapSummary(map_id=self._metadata.map_id, name=self._metadata.name, version=self._metadata.version)]
+        return [MapSummary(map_id=item.map_id, name=item.name, version=item.version) for item in self._metadata.values()]
 
     def metadata(self, map_id: str) -> MapMetadata | None:
-        return self._metadata if map_id == self.map_id else None
+        return self._metadata.get(map_id)
 
     def png(self, map_id: str, version: str | None = None) -> tuple[bytes, str] | None:
-        if map_id != self.map_id or (version is not None and version != self.version):
+        metadata = self.metadata(map_id)
+        if metadata is None or (version is not None and version != metadata.version):
             return None
-        return self._png, f'"{self.map_id}:{self.version}"'
+        return self._png, f'"{metadata.map_id}:{metadata.version}"'
 
     @staticmethod
     def _make_png() -> bytes:

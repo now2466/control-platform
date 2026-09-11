@@ -17,6 +17,7 @@ class StateStore:
         self.formation_override: FormationState | None = None
         self.active_mission: object | None = None
         self.alert_provider: Callable[[], list[object]] | None = None
+        self.map_id_provider: Callable[[], str] | None = None
 
     def disconnect(self, robot_id: str) -> None:
         self.disconnected.add(robot_id)
@@ -30,7 +31,7 @@ class StateStore:
             formation = formation.model_copy(update={"distance_m": None, "gap_error_m": None, "bearing_rad": None})
         self.sequence += 1
         alerts = self.alert_provider() if self.alert_provider else source.active_alerts
-        return source.model_copy(update={"robots": robots, "formation": formation, "active_mission": self.active_mission, "active_alerts": alerts, "seq": self.sequence, "server_time": now})
+        return source.model_copy(update={"robots": robots, "formation": formation, "active_mission": self.active_mission, "active_alerts": alerts, "seq": self.sequence, "server_time": now, "map_id": self.map_id_provider() if self.map_id_provider else source.map_id})
 
     @staticmethod
     def _offline(robot: RobotState) -> RobotState:

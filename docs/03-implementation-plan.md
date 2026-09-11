@@ -172,16 +172,18 @@ class RobotAdapter(Protocol):
 
 검증: `python -m pytest backend/tests/test_alerts.py -q`, 지도 레이어 선택·로봇 전환 화면 테스트.
 
-### T09 — 설정·지도 관리·식별 장치 (R15~R17)
+### T09 — 설정·정적 지도·초기 위치 (축소 범위)
 
-파일: settings_service.py, map_service.py, accessory_service.py, api/settings.py, SettingsPage.tsx, test_settings.py.
+파일: settings_service.py, map_service.py, api/settings.py, SettingsPage.tsx, test_t09_settings.py.
 
-- [ ] 범위·설정 버전 충돌, 양쪽 적용 결과, 실패 시 이전 활성 설정 유지를 구현한다.
-- [ ] 정지 중 초기 위치 설정, 지도 선택/저장/리셋을 구현한다. 지도 변경 시 이전 목표/경로·편대 연결은 무효화한다.
-- [ ] 기존 SetLed/SetLamp 및 감정 서비스 정의를 읽어 장치별 입력 모델을 만들고 미지원 capabilities를 UI에 반영한다.
-- [ ] 이동 중 역할/지도/추종 제한 변경 거부와 모의 부분 적용 실패를 검증한다.
+- [x] 추종 거리·허용 오차, 최대 선/각속도, 카메라 품질의 범위와 설정 version 충돌(409), mock 적용 실패 시 이전 활성 설정 유지를 구현한다.
+- [x] 정지·편대 해제 상태에서만 선택 로봇 초기 위치를 접수하고 request_id 중복 실행을 막는다.
+- [x] 두 정적 mock 지도 중 활성 지도를 선택·저장하고, 이동·활성 편대/임무 중 지도 변경을 거부한다.
+- [x] ADMIN 전용 설정 화면과 GET/PUT·초기 위치 API를 제공한다.
 
-검증: `python -m pytest backend/tests/test_settings.py -q` 및 frontend 설정 화면 입력 경계 테스트.
+SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환 및 실제 ROS 설정 적용은 이 축소 범위에서 제외하며 T12의 실제 계약 확인 후 다룬다.
+
+검증: `python -m pytest backend/tests/test_t09_settings.py -q`, 전체 backend/frontend test 및 frontend production build.
 
 ### T10 — 기록·이력·내보내기 (R13, N10, N11)
 

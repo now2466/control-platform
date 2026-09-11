@@ -27,7 +27,10 @@ def test_map_metadata_png_etag_and_authentication(tmp_path: Path) -> None:
     with authenticated_client(tmp_path) as client:
         listing = client.get("/api/v1/maps")
         assert listing.status_code == 200
-        assert listing.json()["items"] == [{"map_id": "mock_lab", "name": "Mock Lab", "version": "1"}]
+        assert listing.json()["items"] == [
+            {"map_id": "mock_lab", "name": "Mock Lab", "version": "1"},
+            {"map_id": "mock_lab_b", "name": "Mock Lab B", "version": "1"},
+        ]
         metadata = client.get("/api/v1/maps/mock_lab")
         assert metadata.status_code == 200
         assert metadata.json()["frame_id"] == "map"

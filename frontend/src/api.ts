@@ -3,6 +3,8 @@ export type MapMetadata = { map_id: string; name: string; frame_id: string; reso
 export type Goal = { x: number; y: number; yaw: number; frame_id: string }
 export type Formation = { state: string; master_id?: string | null; slave_id?: string | null; distance_m?: number | null; bearing_rad?: number | null; reason_code?: string | null }
 export type Mission = { mission_id: string; state: string; failure_code?: string | null; progress_distance_m?: number | null; waypoint_index?: number; lap_index?: number; total_distance_m?: number | null; waypoints?: Goal[]; name?: string; repeat_count?: number; version?: number }
+export type MapSummary = { map_id: string; name: string; version: string }
+export type ActiveSettings = { version: number; active_map_id: string; follow_distance_m: number; follow_tolerance_m: number; max_linear_mps: number; max_angular_rps: number; camera_quality: 'low' | 'default' | 'high' }
 
 async function errorMessage(response: Response, fallback: string) {
   try { const body = await response.json(); return body?.error?.message ?? body?.detail ?? fallback } catch { return fallback }
@@ -32,6 +34,30 @@ export async function mapMetadata(mapId: string): Promise<MapMetadata> {
   const response = await fetch(`/api/v1/maps/${mapId}`, { credentials: 'include' })
   if (!response.ok) throw new Error(await errorMessage(response, `지도 조회 실패 (${response.status})`))
   return response.json() as Promise<MapMetadata>
+}
+
+export async function listMaps(): Promise<MapSummary[]> {
+  const response = await fetch('/api/v1/maps', { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, `지도 목록 조회 실패 (${response.status})`))
+  return ((await response.json()) as { items?: MapSummary[] }).items ?? []
+}
+
+export async function getSettings(): Promise<ActiveSettings> {
+  const response = await fetch('/api/v1/settings', { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, `설정 조회 실패 (${response.status})`))
+  return response.json() as Promise<ActiveSettings>
+}
+
+export async function updateSettings(values: ActiveSettings): Promise<ActiveSettings> {
+  const response = await fetch('/api/v1/settings', { method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: JSON.stringify({ request_id: crypto.randomUUID(), ...values }) })
+  if (!response.ok) throw new Error(await errorMessage(response, `설정 저장 실패 (${response.status})`))
+  return response.json() as Promise<ActiveSettings>
+}
+
+export async function setInitialPose(robotId: string, pose: Goal): Promise<{ command_id: string }> {
+  const response = await fetch(`/api/v1/robots/${robotId}/initial-pose`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: JSON.stringify({ request_id: crypto.randomUUID(), pose }) })
+  if (!response.ok) throw new Error(await errorMessage(response, `초기 위치 적용 실패 (${response.status})`))
+  return response.json() as Promise<{ command_id: string }>
 }
 
 export async function logout() {

@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pinky_control_center.adapters.mock import MockRobotAdapter
-from pinky_control_center.api import alerts, cameras, control, maps, missions, sensors, session, state
+from pinky_control_center.api import alerts, cameras, control, maps, missions, sensors, session, state, settings
 from pinky_control_center.auth import current_user, verify_mutation
 from pinky_control_center.config import load_mock_config
 from pinky_control_center.models import MockScenario, MockScenarioRequest, UserInfo, UserRole
@@ -28,6 +28,7 @@ from pinky_control_center.state_store import StateStore
 from pinky_control_center.storage import Storage, utc_now
 from pinky_control_center.mission_service import MissionService
 from pinky_control_center.alert_service import AlertService
+from pinky_control_center.settings_service import SettingsService
 
 
 def default_database_path() -> Path:
@@ -50,6 +51,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     safety_service = SafetyService(runtime_clock)
     mission_service = MissionService(storage, adapter, state_store, runtime_clock)
     alert_service = AlertService(storage)
+    settings_service = SettingsService(storage, adapter, map_service, state_store)
     state_store.alert_provider = lambda: alert_service.list(state="ACTIVE")
     for operation in ("formation_pair", "formation_start", "formation_pause", "formation_unpair", "formation_rejoin"):
         command_service.handlers[operation] = mission_service.execute_formation
@@ -84,12 +86,14 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.state.safety_service = safety_service
     app.state.mission_service = mission_service
     app.state.alert_service = alert_service
+    app.state.settings_service = settings_service
     def refresh_stops() -> None:
         for robot in state_store.snapshot().robots:
             safety_service.observe(robot.robot_id, stop_latched=bool(robot.stop_latched), linear_mps=robot.linear_mps, angular_rps=robot.angular_rps, fresh=robot.pose_freshness.value == "FRESH")
         command_service.refresh_stops(safety_service.states())
     app.state.allowed_origin = allowed_origin
     app.state.state_store = state_store
+    state_store.map_id_provider = lambda: settings_service.current().active_map_id
 
     async def protective_stop(robot_id: str) -> None:
         teleop_service.protective_stop(robot_id)
@@ -128,6 +132,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.add_api_websocket_route("/ws/teleop", control.teleop)
     app.include_router(state.create_router(state_store))
     app.include_router(maps.create_router(map_service))
+    app.include_router(settings.create_router())
     app.include_router(cameras.create_router(camera_service))
     app.include_router(alerts.router)
     app.include_router(sensors.router)

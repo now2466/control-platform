@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from pinky_control_center.models import Alert, AlertState, ControlLease, UserInfo, UserRole
+from pinky_control_center.models import ActiveSettings, Alert, AlertState, ControlLease, UserInfo, UserRole
 
 Clock = Callable[[], datetime]
 
@@ -88,6 +88,28 @@ class Storage:
                 sql = resources.files("pinky_control_center").joinpath("migrations", "005_alerts.sql").read_text(encoding="utf-8")
                 self.connection.executescript(sql)
                 self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(5, ?)", (_timestamp(self.clock()),))
+            if 6 not in applied:
+                sql = resources.files("pinky_control_center").joinpath("migrations", "006_settings.sql").read_text(encoding="utf-8")
+                self.connection.executescript(sql)
+                self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(6, ?)", (_timestamp(self.clock()),))
+
+    def settings(self) -> ActiveSettings:
+        row = self.connection.execute("SELECT version,values_json FROM active_settings WHERE id=1").fetchone()
+        if row is None:  # Defensive for databases imported before migration tracking existed.
+            raise RuntimeError("active settings are missing")
+        return ActiveSettings.model_validate({"version": row["version"], **json.loads(row["values_json"])})
+
+    def update_settings(self, expected_version: int, values: ActiveSettings) -> ActiveSettings | None:
+        """Compare and swap the active settings; None means a stale client."""
+        payload = values.model_dump(mode="json", exclude={"version"})
+        with self._command_lock, self.connection:
+            result = self.connection.execute(
+                "UPDATE active_settings SET version=?, values_json=?, updated_at=? WHERE id=1 AND version=?",
+                (expected_version + 1, json.dumps(payload, sort_keys=True), _timestamp(self.clock()), expected_version),
+            )
+        if result.rowcount != 1:
+            return None
+        return ActiveSettings.model_validate({"version": expected_version + 1, **payload})
 
     def upsert_alert(self, alert: Alert) -> Alert:
         payload = alert.model_dump(mode="json")
