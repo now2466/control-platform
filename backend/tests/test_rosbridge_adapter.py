@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import ssl
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -58,6 +59,15 @@ def test_ros_config_locks_domain_ids_and_uses_two_endpoints() -> None:
     data = load_ros_config().model_dump(mode="python")
     data["robots"][0]["topics"]["odom"] = "/robot_2/odom"
     with pytest.raises(ValidationError, match="must stay under /robot_1"):
+        RosbridgeConfig.model_validate(data)
+    data = load_ros_config().model_dump(mode="python")
+    data["robots"][0]["bridge_url"] = "wss://robot-1.local:9090"
+    data["robots"][0]["security"] = {"client_cert_env": "ROBOT_CERT"}
+    with pytest.raises(ValidationError, match="configured together"):
+        RosbridgeConfig.model_validate(data)
+    data = load_ros_config().model_dump(mode="python")
+    data["robots"][0]["security"] = {"authorization_token_env": "ROBOT_TOKEN"}
+    with pytest.raises(ValidationError, match="require a wss"):
         RosbridgeConfig.model_validate(data)
 
 
@@ -161,6 +171,89 @@ def test_battery_updates_do_not_refresh_an_old_pose() -> None:
         observed = StateStore(adapter.snapshot, clock=lambda: now[0]).snapshot().robots[0]
         assert observed.pose_freshness is Freshness.STALE
         assert observed.battery_freshness is Freshness.FRESH
+
+    asyncio.run(exercise())
+
+
+def test_disconnect_and_reconnect_do_not_revive_old_telemetry() -> None:
+    async def exercise() -> None:
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
+        adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
+        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+            "header": {"frame_id": "odom"},
+            "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
+            "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
+        })
+        await adapter.handle_publish("robot_1", "/robot_1/battery/percent", {"data": 86.0})
+        adapter._mark_disconnected("robot_1")
+        now[0] += timedelta(milliseconds=100)
+        adapter._mark_connected("robot_1")
+        robot = adapter.snapshot().robots[0]
+        assert robot.pose is None
+        assert robot.pose_freshness is Freshness.UNKNOWN
+        assert robot.battery_percent is None and robot.battery_freshness is Freshness.UNKNOWN
+
+    asyncio.run(exercise())
+
+
+def test_camera_sensor_stales_while_odom_continues() -> None:
+    async def exercise() -> None:
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
+        adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
+        jpeg = MockRobotAdapter().frame("robot_1").jpeg
+        await adapter.handle_publish("robot_1", "/robot_1/camera/image_raw/compressed", {"data": base64.b64encode(jpeg).decode()})
+        now[0] += timedelta(seconds=2, milliseconds=1)
+        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+            "header": {"frame_id": "odom"},
+            "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
+            "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
+        })
+        camera = next(sensor for sensor in adapter.snapshot().robots[0].sensors if sensor.name == "camera")
+        assert camera.state.value == "STALE"
+
+    asyncio.run(exercise())
+
+
+def test_fragment_buffers_limit_active_ids_and_event_consumers_close() -> None:
+    async def exercise() -> None:
+        adapter = RosbridgeAdapter(load_ros_config())
+        for number in range(17):
+            adapter._accept_fragment("robot_1", {"id": f"partial-{number}", "num": 0, "total": 2, "data": "{"})
+        assert len(adapter._fragments["robot_1"]) == 16
+        assert "partial-0" not in adapter._fragments["robot_1"]
+
+        async def consume() -> bool:
+            async for _event in adapter.events():
+                pass
+            return True
+
+        consumer = asyncio.create_task(consume())
+        await asyncio.sleep(0)
+        await adapter.close()
+        assert await asyncio.wait_for(consumer, timeout=1) is True
+
+    asyncio.run(exercise())
+
+
+def test_secure_bridge_uses_tls_context_and_environment_token(monkeypatch) -> None:
+    async def exercise() -> None:
+        data = load_ros_config().model_dump(mode="python")
+        data["robots"][0]["bridge_url"] = "wss://robot-1.local:9090"
+        data["robots"][0]["security"] = {"verify_tls": True, "authorization_token_env": "ROBOT_1_BRIDGE_TOKEN"}
+        config = RosbridgeConfig.model_validate(data)
+        captured: dict[str, object] = {}
+
+        async def connect(url: str, **kwargs):
+            captured.update({"url": url, **kwargs})
+            return object()
+
+        adapter = RosbridgeAdapter(config, connect_factory=connect)
+        monkeypatch.setenv("ROBOT_1_BRIDGE_TOKEN", "test-only-token")
+        await adapter._open("robot_1")
+        assert captured["url"] == "wss://robot-1.local:9090"
+        assert isinstance(captured["ssl"], ssl.SSLContext)
+        assert captured["additional_headers"] == {"Authorization": "Bearer test-only-token"}
+        assert "test-only-token" not in str(config.model_dump())
 
     asyncio.run(exercise())
 

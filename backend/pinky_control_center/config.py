@@ -75,12 +75,30 @@ class RosbridgeCameraOptions(BaseModel):
     fragment_size: int = Field(default=65_536, ge=1024, le=1_000_000)
 
 
+class RosbridgeSecurityConfig(BaseModel):
+    """Names of deployment environment variables; never credential values."""
+
+    model_config = ConfigDict(extra="forbid")
+    verify_tls: bool = True
+    ca_cert_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    client_cert_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    client_key_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    authorization_token_env: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+
+    @model_validator(mode="after")
+    def paired_client_certificate(self) -> "RosbridgeSecurityConfig":
+        if bool(self.client_cert_env) != bool(self.client_key_env):
+            raise ValueError("client_cert_env and client_key_env must be configured together")
+        return self
+
+
 class RosbridgeRobotConfig(RobotConfig):
     domain_id: int
     bridge_url: str
     topics: RosbridgeTopics
     services: RosbridgeServices
     camera: RosbridgeCameraOptions = Field(default_factory=RosbridgeCameraOptions)
+    security: RosbridgeSecurityConfig = Field(default_factory=RosbridgeSecurityConfig)
 
     @field_validator("bridge_url")
     @classmethod
@@ -89,6 +107,14 @@ class RosbridgeRobotConfig(RobotConfig):
         if parsed.scheme not in {"ws", "wss"} or not parsed.netloc:
             raise ValueError("bridge_url must be a ws:// or wss:// URL")
         return value
+
+    @model_validator(mode="after")
+    def secure_transport_matches_url(self) -> "RosbridgeRobotConfig":
+        if urlparse(self.bridge_url).scheme != "wss" and (
+            self.security.ca_cert_env or self.security.client_cert_env or self.security.authorization_token_env
+        ):
+            raise ValueError("TLS or authorization environment mappings require a wss:// bridge_url")
+        return self
 
 
 class RosbridgeConfig(BaseModel):

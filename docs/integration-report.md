@@ -4,7 +4,9 @@
 
 `backend/pinky_control_center/resources/config/robots.ros.yaml`은 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`을 검증하고, 두 개의 서로 다른 rosbridge URL을 요구한다. domain ID는 API와 UI에 노출하거나 변경하는 기능이 없다. backend만 rosbridge에 연결한다.
 
-`RosbridgeAdapter`는 robot별 websocket, 재연결(1/2/4/8초), odom/battery/control-status/path/compressed-camera 구독 및 JPEG cache를 구현했다. configured `fragment_size`로 전송된 rosbridge fragment는 최대 64개·4 MiB·5초로 제한해 재조립하며, 초과·불일치 fragment는 버린다. 연결이 끊기면 해당 robot의 JPEG cache도 폐기한다. `Odometry`와 battery timestamp는 분리해 battery 수신이 stale pose를 fresh로 만들지 않는다. `Odometry`는 `map` 좌표로 간주하지 않는다. map-to-odom TF가 실제로 확인될 때까지 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 표시한다.
+`RosbridgeAdapter`는 robot별 websocket, 재연결(1/2/4/8초), odom/battery/control-status/path/compressed-camera 구독 및 JPEG cache를 구현했다. configured `fragment_size`로 전송된 rosbridge fragment는 최대 16 active ID·64개/ID·4 MiB/ID·5초로 제한해 재조립하며, 초과·불일치 fragment는 버린다. 연결이 끊기면 해당 robot의 JPEG cache와 pose/battery/camera timestamp를 폐기한다. `Odometry`와 battery timestamp는 분리해 battery 수신이 stale pose를 fresh로 만들지 않고 camera는 2초 뒤 STALE이다. `Odometry`는 `map` 좌표로 간주하지 않는다. map-to-odom TF가 실제로 확인될 때까지 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 표시한다.
+
+Optional secure bridge mapping is available only for `wss://` URLs. `security.verify_tls` defaults to true; CA bundle path, client certificate/key paths, and bearer token are referenced by `ca_cert_env`, `client_cert_env`/`client_key_env`, and `authorization_token_env`. YAML stores only environment variable names, never secret values or certificate contents. Missing configured values fail the individual reconnect without logging the value.
 
 ## 저장소 조사 결과
 

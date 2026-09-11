@@ -12,6 +12,8 @@ import base64
 import inspect
 import json
 import math
+import os
+import ssl
 import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -35,6 +37,8 @@ _RECONNECT_DELAYS = (1, 2, 4, 8)
 _MAX_FRAGMENT_COUNT = 64
 _MAX_FRAGMENT_BYTES = 4 * 1024 * 1024
 _FRAGMENT_TTL_SECONDS = 5.0
+_MAX_FRAGMENT_IDS = 16
+_CAMERA_STALE_SECONDS = 2.0
 
 
 @dataclass
@@ -77,7 +81,8 @@ class RosbridgeAdapter:
         self._sockets: dict[RobotId, Any] = {}
         self._tasks: dict[RobotId, asyncio.Task[None]] = {}
         self._connected = False
-        self._event_queue: asyncio.Queue[AdapterEvent] = asyncio.Queue(maxsize=200)
+        self._event_queue: asyncio.Queue[AdapterEvent | None] = asyncio.Queue(maxsize=200)
+        self._event_closed = False
         self._drained_events: list[AdapterEvent] = []
         self._frames: dict[RobotId, CameraFrame] = {}
         self._service_calls: dict[str, _PendingServiceCall] = {}
@@ -87,6 +92,7 @@ class RosbridgeAdapter:
         }
         self._pose_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
         self._battery_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
+        self._camera_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
 
     def _blank_state(self, robot: RosbridgeRobotConfig) -> RobotState:
         return RobotState(
@@ -100,6 +106,9 @@ class RosbridgeAdapter:
     async def connect(self) -> None:
         if self._connected:
             return
+        if self._event_closed:
+            self._event_queue = asyncio.Queue(maxsize=200)
+            self._event_closed = False
         self._connected = True
         for robot_id in ("robot_1", "robot_2"):
             self._tasks[robot_id] = asyncio.create_task(self._run(robot_id))
@@ -128,9 +137,11 @@ class RosbridgeAdapter:
         self._service_calls.clear()
         for robot_id in self._states:
             self._mark_disconnected(robot_id)
+        self._close_event_stream()
 
-    async def _open(self, url: str) -> Any:
-        candidate = self._connect_factory(url, open_timeout=5)
+    async def _open(self, robot_id: RobotId) -> Any:
+        robot = self._by_id[robot_id]
+        candidate = self._connect_factory(robot.bridge_url, open_timeout=5, **self._connection_kwargs(robot_id))
         if inspect.isawaitable(candidate):
             return await candidate
         return candidate
@@ -140,7 +151,7 @@ class RosbridgeAdapter:
         while self._connected:
             socket: Any | None = None
             try:
-                socket = await self._open(self._by_id[robot_id].bridge_url)
+                socket = await self._open(robot_id)
                 self._sockets[robot_id] = socket
                 self._mark_connected(robot_id)
                 await self._subscribe(robot_id, socket)
@@ -207,10 +218,15 @@ class RosbridgeAdapter:
     def _mark_disconnected(self, robot_id: RobotId) -> None:
         self._frames.pop(robot_id, None)
         self._fragments[robot_id].clear()
+        self._pose_received_at[robot_id] = None
+        self._battery_received_at[robot_id] = None
+        self._camera_received_at[robot_id] = None
         current = self._states[robot_id]
         self._states[robot_id] = current.model_copy(update={
             "connection": Connection.OFFLINE, "received_at": None,
             "pose_freshness": Freshness.UNKNOWN, "battery_freshness": Freshness.UNKNOWN,
+            "pose": None, "linear_mps": None, "angular_rps": None,
+            "battery_percent": None, "voltage_v": None,
             "tf_valid": False, "tf_reason_code": "ROSBRIDGE_OFFLINE",
             "sensors": [SensorStatus(name="camera", state=SensorState.STALE)],
         })
@@ -252,6 +268,9 @@ class RosbridgeAdapter:
             return None
         buffer = buffers.get(fragment_id)
         if buffer is None:
+            if len(buffers) >= _MAX_FRAGMENT_IDS:
+                oldest = min(buffers, key=lambda value: buffers[value].created_at)
+                del buffers[oldest]
             buffer = _FragmentBuffer(total=total, created_at=now, chunks={})
             buffers[fragment_id] = buffer
         elif buffer.total != total:
@@ -387,6 +406,7 @@ class RosbridgeAdapter:
         self._states[robot_id] = self._states[robot_id].model_copy(update={
             "sensors": [SensorStatus(name="camera", state=SensorState.OK, received_at=now)]
         })
+        self._camera_received_at[robot_id] = now
         return frame
 
     def _path_payload(self, robot_id: RobotId, message: dict[str, object]) -> dict[str, object]:
@@ -403,6 +423,8 @@ class RosbridgeAdapter:
         return {"robot_id": robot_id, "frame_id": _frame_id(message, ""), "points": points}
 
     async def _emit(self, kind: Literal["robot_state", "formation", "command", "map", "path", "scan", "costmap"], robot_id: RobotId | None, payload: dict[str, object], now: datetime) -> None:
+        if self._event_closed:
+            return
         event = AdapterEvent(kind=kind, robot_id=robot_id, payload=payload, received_at=now)
         self._drained_events.append(event)
         if self._event_queue.full():
@@ -441,8 +463,14 @@ class RosbridgeAdapter:
         return events
 
     async def events(self) -> AsyncIterator[AdapterEvent]:
-        while self._connected:
-            yield await self._event_queue.get()
+        while True:
+            event = await self._event_queue.get()
+            if event is None:
+                # Keep a terminal marker available for another consumer.
+                if self._event_closed and not self._event_queue.full():
+                    self._event_queue.put_nowait(None)
+                return
+            yield event
 
     async def frames(self, robot_id: str) -> AsyncIterator[CameraFrame]:
         last_id: str | None = None
@@ -498,7 +526,38 @@ class RosbridgeAdapter:
         pose_at, battery_at = self._pose_received_at[robot_id], self._battery_received_at[robot_id]
         pose_freshness = _freshness(pose_at, now, 1.0)
         battery_freshness = _freshness(battery_at, now, 15.0)
-        return current.model_copy(update={"pose_freshness": pose_freshness, "battery_freshness": battery_freshness})
+        camera_freshness = _freshness(self._camera_received_at[robot_id], now, _CAMERA_STALE_SECONDS)
+        sensors = [
+            sensor.model_copy(update={"state": SensorState.OK if camera_freshness is Freshness.FRESH else SensorState.STALE})
+            if sensor.name == "camera" else sensor
+            for sensor in current.sensors
+        ]
+        return current.model_copy(update={"pose_freshness": pose_freshness, "battery_freshness": battery_freshness, "sensors": sensors})
+
+    def _connection_kwargs(self, robot_id: RobotId) -> dict[str, object]:
+        """Resolve environment references at connect time without exposing values."""
+        robot = self._by_id[robot_id]
+        security = robot.security
+        if robot.bridge_url.startswith("ws://"):
+            return {}
+        context = ssl.create_default_context(cafile=_required_env_path(security.ca_cert_env) if security.ca_cert_env else None)
+        if not security.verify_tls:
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        if security.client_cert_env and security.client_key_env:
+            context.load_cert_chain(_required_env_path(security.client_cert_env), _required_env_path(security.client_key_env))
+        result: dict[str, object] = {"ssl": context}
+        if security.authorization_token_env:
+            result["additional_headers"] = {"Authorization": f"Bearer {_required_env_value(security.authorization_token_env)}"}
+        return result
+
+    def _close_event_stream(self) -> None:
+        if self._event_closed:
+            return
+        self._event_closed = True
+        if self._event_queue.full():
+            self._event_queue.get_nowait()
+        self._event_queue.put_nowait(None)
 
 
 def _nested_dict(value: object, *keys: str) -> dict[str, object]:
@@ -522,6 +581,17 @@ def _freshness(received_at: datetime | None, now: datetime, max_age_seconds: flo
     if received_at is None:
         return Freshness.UNKNOWN
     return Freshness.FRESH if now - received_at <= timedelta(seconds=max_age_seconds) else Freshness.STALE
+
+
+def _required_env_value(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError("configured rosbridge credential is unavailable")
+    return value
+
+
+def _required_env_path(name: str) -> str:
+    return _required_env_value(name)
 
 
 def _yaw(orientation: dict[str, object]) -> float:
