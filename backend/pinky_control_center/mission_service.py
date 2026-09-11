@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import UUID, uuid4
+import threading
 
 from fastapi import HTTPException
 
@@ -14,6 +15,7 @@ class MissionService:
         self.active_id: str | None = None
         self.slave_wait_deadline: float | None = None
         self.formation_pause_pending: tuple[str, str] | None = None
+        self._tick_lock = threading.Lock()
         # Recovery never resumes motion. Persisted in-flight missions need operator action.
         import json
         for row in self.storage.connection.execute("SELECT id,payload_json FROM missions WHERE state IN ('STARTING','RUNNING','PAUSING','CANCELING')"):
@@ -23,7 +25,7 @@ class MissionService:
 
     def master_navigation_succeeded(self, mission_id: str) -> None:
         """Adapter result hook: master success is not mission success until the slave is settled."""
-        if mission_id == self.active_id:
+        if mission_id == self.active_id and self.slave_wait_deadline is None:
             self.slave_wait_deadline = self.clock() + 10.0
 
     def consume_adapter_event(self, event) -> None:
@@ -47,6 +49,14 @@ class MissionService:
         self.state_store.formation_override = current.model_copy(update={"state": state, "reason_code": reason})
 
     async def tick(self) -> None:
+        if not self._tick_lock.acquire(blocking=False):
+            return
+        try:
+            await self._tick()
+        finally:
+            self._tick_lock.release()
+
+    async def _tick(self) -> None:
         """Complete transitional states only from fresh stop observations."""
         if self.formation_pause_pending:
             master, slave = self.formation_pause_pending
@@ -56,11 +66,38 @@ class MissionService:
                 self.formation_pause_pending = None
         if not self.active_id:
             return
-        row = self.storage.connection.execute("SELECT payload_json FROM missions WHERE id=?", (self.active_id,)).fetchone()
+        mission_id = self.active_id
+        row = self.storage.connection.execute("SELECT payload_json FROM missions WHERE id=?", (mission_id,)).fetchone()
         if not row:
             return
         import json
         mission = json.loads(row["payload_json"])
+        if mission["state"] == "RUNNING":
+            master = next(robot for robot in self.state_store.snapshot().robots if robot.robot_id == mission["master_id"])
+            goal = mission["waypoints"][mission["waypoint_index"]]
+            if master.pose is not None:
+                import math
+                mission["progress_distance_m"] = math.hypot(goal["x"] - master.pose.x, goal["y"] - master.pose.y)
+                self.storage.update_mission(mission_id, mission)
+        if self.slave_wait_deadline is not None and mission["state"] == "RUNNING":
+            robots = {robot.robot_id: robot for robot in self.state_store.snapshot().robots}
+            slave = robots[mission["slave_id"]]
+            formation = self.formation()
+            settled = slave.stop_latched and slave.pose_freshness == Freshness.FRESH and abs(slave.linear_mps or 0) < .01 and abs(slave.angular_rps or 0) < .02 and formation.distance_m is not None and abs(formation.distance_m - formation.target_distance_m) <= .2
+            if settled:
+                # Mark this completion consumed before awaiting the next adapter call.
+                self.slave_wait_deadline = float("inf")
+                if mission["waypoint_index"] + 1 < len(mission["waypoints"]):
+                    mission["waypoint_index"] += 1
+                    await self._navigate(mission, mission_id)
+                elif mission["lap_index"] + 1 < mission["repeat_count"]:
+                    mission["lap_index"] += 1; mission["waypoint_index"] = 0
+                    await self._navigate(mission, mission_id)
+                else:
+                    mission["state"] = "SUCCEEDED"; self.active_id = None; self._set_formation(FormationMode.READY)
+                self.storage.update_mission(mission_id, mission)
+                if mission["state"] == "RUNNING": self.slave_wait_deadline = None
+                return
         if self.slave_wait_deadline is not None and self.clock() >= self.slave_wait_deadline and mission["state"] == "RUNNING":
             mission["state"] = "PAUSED"; mission["failure_code"] = "SLAVE_SETTLE_TIMEOUT"
             self._set_formation(FormationMode.PAUSED, "SLAVE_SETTLE_TIMEOUT")
@@ -124,7 +161,7 @@ class MissionService:
         action = operation.removeprefix("formation_")
         master, slave = str(parameters.get("master_id", "robot_1")), str(parameters.get("slave_id", "robot_2"))
         if action == "pair":
-            self.state_store.formation_override = FormationState(state=FormationMode.READY, master_id=master, slave_id=slave, target_distance_m=.8)
+            self.state_store.formation_override = FormationState(state=FormationMode.READY, master_id=master, slave_id=slave, target_distance_m=.8, distance_m=.8, gap_error_m=0.)
         elif action == "unpair": self._set_formation(FormationMode.UNPAIRED)
         elif action == "pause":
             from pinky_control_center.models import CommandRequest
@@ -156,13 +193,49 @@ class MissionService:
 
     def create(self, user: UserInfo, payload: dict[str, object]) -> dict[str, object]:
         waypoints = payload.get("waypoints")
-        if not isinstance(waypoints, list) or len(waypoints) != 1:
+        if not isinstance(waypoints, list) or not 1 <= len(waypoints) <= 100:
             raise HTTPException(422, detail="INVALID_VALUE")
-        try: Pose.model_validate(waypoints[0])
+        try:
+            for waypoint in waypoints:
+                Pose.model_validate(waypoint)
         except Exception as error: raise HTTPException(422, detail="INVALID_VALUE") from error
-        data = {"name": payload.get("name"), "state": MissionState.DRAFT.value, "master_id": self.formation().master_id, "slave_id": self.formation().slave_id, "map_id": payload.get("map_id"), "waypoints": waypoints, "repeat_count": payload.get("repeat_count", 1), "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None}
+        data = {"name": payload.get("name"), "state": MissionState.DRAFT.value, "master_id": self.formation().master_id, "slave_id": self.formation().slave_id, "map_id": payload.get("map_id"), "waypoints": waypoints, "repeat_count": payload.get("repeat_count", 1), "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None, "version": 1}
         if not isinstance(data["name"], str) or not isinstance(data["map_id"], str) or data["map_id"] != "mock_lab" or not isinstance(data["repeat_count"], int) or not 1 <= data["repeat_count"] <= 100: raise HTTPException(422, detail="INVALID_VALUE")
         return self.storage.create_mission_idempotent(user, UUID(str(payload["request_id"])), data)
+
+    def edit(self, user: UserInfo, mission_id: str, payload: dict[str, object]) -> dict[str, object]:
+        with self.storage._command_lock:
+            return self._edit_locked(user, mission_id, payload)
+
+    def _edit_locked(self, user: UserInfo, mission_id: str, payload: dict[str, object]) -> dict[str, object]:
+        request_id = UUID(str(payload["request_id"])); command = self.storage.create_command(user, request_id, mission_id, {"operation": "mission_edit", "mission_id": mission_id, "payload": {key: value for key, value in payload.items() if key not in {"request_id", "lease_id"}}}); existing = command.get("result", {}).get("mission") if isinstance(command.get("result"), dict) else None
+        if existing: return existing
+        mission = self.storage.mission(mission_id, user)
+        if mission is None: raise HTTPException(404, detail="MISSION_NOT_FOUND")
+        if mission["state"] not in {"DRAFT", "READY"} or payload.get("version") != mission.get("version"):
+            raise HTTPException(409, detail="STALE_VERSION" if payload.get("version") != mission.get("version") else "INVALID_STATE")
+        for field in ("name", "waypoints", "repeat_count"):
+            if field in payload: mission[field] = payload[field]
+        if not isinstance(mission["name"], str) or not 1 <= len(mission["name"].strip()) <= 128:
+            raise HTTPException(422, detail="INVALID_VALUE")
+        if not isinstance(mission["waypoints"], list) or not 1 <= len(mission["waypoints"]) <= 100 or not isinstance(mission["repeat_count"], int) or not 1 <= mission["repeat_count"] <= 100:
+            raise HTTPException(422, detail="INVALID_VALUE")
+        try:
+            for waypoint in mission["waypoints"]: Pose.model_validate(waypoint)
+        except Exception as error: raise HTTPException(422, detail="INVALID_VALUE") from error
+        if mission["state"] == "READY": mission["state"] = "DRAFT"
+        mission["version"] += 1; self.storage.update_mission(mission_id, mission)
+        self.storage.set_command_result(str(command["command_id"]), {"mission": mission}); self.storage.set_command_state(str(command["command_id"]), "SUCCEEDED")
+        return mission
+
+    async def _navigate(self, mission: dict[str, object], mission_id: str) -> None:
+        from pinky_control_center.models import CommandRequest
+        accepted = await self.adapter.execute(CommandRequest(command_id=uuid4(), robot_id=mission["master_id"], operation="navigate", parameters={"goal": mission["waypoints"][mission["waypoint_index"]], "mission_id": mission_id}))
+        if not accepted.accepted:
+            for robot_id in (mission["master_id"], mission["slave_id"]):
+                try: await self.adapter.execute(CommandRequest(command_id=uuid4(), robot_id=robot_id, operation="stop", parameters={"reason":"NAVIGATION_REJECTED"}))
+                except Exception: pass
+            mission["state"] = "FAILED"; mission["failure_code"] = "NAVIGATION_REJECTED"; self.active_id = None
 
     def action(self, user: UserInfo, mission_id: str, request_id: UUID, action: str, dispatcher):
         mission = self.storage.mission(mission_id, user)
@@ -171,7 +244,11 @@ class MissionService:
         valid = {"validate": {"DRAFT"}, "start": {"READY", "PAUSED"}, "pause": {"RUNNING"}, "resume": {"PAUSED"}, "cancel": {"DRAFT", "READY", "RUNNING", "PAUSED"}}
         if action not in valid or state not in valid[action]: raise HTTPException(409, detail="INVALID_STATE")
         if action in {"start", "resume"} and self.formation().state not in {FormationMode.READY, FormationMode.PAUSED}: raise HTTPException(409, detail="INVALID_STATE")
-        return dispatcher.submit(user, request_id, mission_id, "mission_" + action, parameters={"mission_id": mission_id})
+        result = dispatcher.submit(user, request_id, mission_id, "mission_" + action, parameters={"mission_id": mission_id})
+        # Claim a start synchronously: distinct concurrent requests cannot enqueue two goals.
+        if action in {"start", "resume"} and result.get("state") == "ACCEPTED":
+            mission["state"] = "STARTING"; self.storage.update_mission(mission_id, mission)
+        return result
 
     async def execute_mission(self, operation: str, parameters: dict[str, object], user: UserInfo | None = None) -> tuple[bool, dict[str, object]]:
         mission_id = str(parameters["mission_id"])
@@ -182,7 +259,7 @@ class MissionService:
         if action == "validate": mission["state"] = "READY"
         elif action in {"start", "resume"}:
             mission["state"] = "STARTING"; slave, master = mission["slave_id"], mission["master_id"]
-            calls = [(slave, "follow_ready", {}), (slave, "follow_start", {}), (master, "navigate", {"goal": mission["waypoints"][mission["waypoint_index"]], "mission_id": mission_id})]
+            calls = [(slave, "follow_ready", {}), (slave, "follow_start", {})]
             for robot_id, op, params in calls:
                 accepted = await self.adapter.execute(__import__('pinky_control_center.models', fromlist=['CommandRequest']).CommandRequest(command_id=uuid4(), robot_id=robot_id, operation=op, parameters=params))
                 if not accepted.accepted:
@@ -191,6 +268,8 @@ class MissionService:
                         except Exception: pass
                     mission["state"]="PAUSED"; mission["failure_code"]="FOLLOW_REJECTED"; self._set_formation(FormationMode.PAUSED, "FOLLOW_REJECTED"); self.storage.update_mission(mission_id, mission); return False, {"reason_code":"FOLLOW_REJECTED"}
             mission["state"]="RUNNING"; self._set_formation(FormationMode.FOLLOWING); self.active_id=mission_id
+            await self._navigate(mission, mission_id)
+            if mission["state"] == "FAILED": self.storage.update_mission(mission_id, mission); return False, {"reason_code": "NAVIGATION_REJECTED"}
         elif action in {"pause", "cancel"}:
             if action == "cancel" and mission["state"] in {"DRAFT", "READY"}:
                 mission["state"] = "CANCELED"

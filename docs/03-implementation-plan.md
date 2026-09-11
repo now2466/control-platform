@@ -154,12 +154,12 @@ class RobotAdapter(Protocol):
 
 파일: mission_service.py, MissionPanel.tsx, test_missions.py, missions.spec.ts.
 
-- [ ] 1~100개 경유점, 반복 횟수, 편집/저장/정렬과 현재 지점·회차를 구현한다.
-- [ ] pause에서 진행 지점 저장, resume에서 해당 지점 재목표화, cancel에서 양쪽 정지 확인을 구현한다.
-- [ ] 3지점×2회 경로의 목표 호출 순서와 실패 시 다음 지점 미전송을 검증한다.
-- [ ] 서버 재시작 후 PAUSED 복구와 자동 주행 금지를 검증한다.
+- [x] 1~100개 경유점, 반복 횟수, 편집/저장/정렬과 현재 지점·회차를 구현한다.
+- [x] pause에서 진행 지점 저장, resume에서 해당 지점 재목표화, cancel에서 양쪽 정지 확인을 구현한다.
+- [x] 3지점×2회 경로의 목표 호출 순서와 실패 시 다음 지점 미전송을 검증한다.
+- [x] 서버 재시작 후 PAUSED 복구와 자동 주행 금지를 검증한다.
 
-검증: test_missions.py 및 missions.spec.ts에 순찰·재시작 시나리오를 추가한다.
+검증: backend 66 tests, frontend 43 tests와 production build. 3지점×2회 순찰, 중간 거절 보호 정지, pause/resume 지점 보존, 재시작 PAUSED/no-auto, 목록·편집·복구 UI를 실제 API·mock adapter·DOM 테스트로 검증한다.
 
 ### T08 — 알림·센서 상세 (R11, R12)
 

@@ -34,7 +34,7 @@ def default_database_path() -> Path:
     return state_home / "control-platform" / "control.db"
 
 
-def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", monotonic_clock=None, start_command_worker: bool = True, storage_clock=None) -> FastAPI:
+def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None = None, database_path: Path | None = None, allowed_origin: str = "http://localhost:5173", monotonic_clock=None, start_command_worker: bool = True, storage_clock=None, start_watchdog: bool = True) -> FastAPI:
     if mode != "mock":
         raise ValueError("ROS mode is not available in T01; start with --mode mock")
     adapter = MockRobotAdapter(config=load_mock_config(config_path))
@@ -58,13 +58,14 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
         await adapter.connect()
         if start_command_worker:
             await command_service.start()
-        watchdog_task = asyncio.create_task(watchdog())
+        watchdog_task = asyncio.create_task(watchdog()) if start_watchdog else None
         yield
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except asyncio.CancelledError:
-            pass
+        if watchdog_task:
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
         await command_service.close()
         await adapter.close()
         await camera_service.close()

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from pinky_control_center.api.control import operator
 from pinky_control_center.auth import current_user
@@ -45,6 +46,20 @@ async def get_mission(mission_id: str, request: Request, user: UserInfo = Depend
     value = request.app.state.storage.mission(mission_id, user)
     if value is None: raise HTTPException(404, detail="MISSION_NOT_FOUND")
     return value
+
+@router.get("/missions")
+async def list_missions(request: Request, user: UserInfo = Depends(current_user), limit: int = 20, cursor: int = 0, state: str | None = None, from_time: datetime | None = Query(None, alias="from"), to_time: datetime | None = Query(None, alias="to")) -> dict[str, object]:
+    if not 1 <= limit <= 100 or cursor < 0: raise HTTPException(422, detail="INVALID_VALUE")
+    if from_time and to_time and from_time > to_time: raise HTTPException(422, detail="INVALID_VALUE")
+    items, next_cursor = request.app.state.storage.missions(user, state=state, limit=limit, cursor=cursor, from_time=from_time.isoformat() if from_time else None, to_time=to_time.isoformat() if to_time else None)
+    return {"items": items, "next_cursor": next_cursor}
+
+@router.patch("/missions/{mission_id}")
+async def edit_mission(mission_id: str, payload: dict[str, object], request: Request, user: UserInfo = Depends(operator)) -> dict[str, object]:
+    try:
+        request_id(payload); leased_operator(request, payload, user)
+        return request.app.state.mission_service.edit(user, mission_id, payload)
+    except ValueError as error: raise HTTPException(409, detail="REQUEST_ID_CONFLICT") from error
 
 
 @router.post("/missions/{mission_id}/actions", status_code=202)

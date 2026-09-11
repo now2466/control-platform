@@ -108,9 +108,19 @@ class Storage:
         row = self.connection.execute("SELECT id,payload_json,created_at,updated_at FROM missions WHERE id=? AND user_id=?", (mission_id, str(user.user_id))).fetchone()
         return None if row is None else {"mission_id": row["id"], **json.loads(row["payload_json"]), "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
+    def missions(self, user: UserInfo, *, state: str | None, limit: int, cursor: int, from_time: str | None = None, to_time: str | None = None) -> tuple[list[dict[str, object]], int | None]:
+        query = "SELECT id,payload_json,created_at,updated_at FROM missions WHERE user_id=?"
+        args: list[object] = [str(user.user_id)]
+        if state: query += " AND state=?"; args.append(state)
+        if from_time: query += " AND created_at>=?"; args.append(from_time)
+        if to_time: query += " AND created_at<=?"; args.append(to_time)
+        query += " ORDER BY created_at ASC,id ASC LIMIT ? OFFSET ?"; args.extend([limit + 1, cursor])
+        rows = self.connection.execute(query, args).fetchall(); more = len(rows) > limit; rows = rows[:limit]
+        return ([{"mission_id": row["id"], **json.loads(row["payload_json"]), "created_at": row["created_at"], "updated_at": row["updated_at"]} for row in rows], cursor + limit if more else None)
+
     def update_mission(self, mission_id: str, payload: dict[str, object]) -> None:
         now = _timestamp(self.clock())
-        with self.connection:
+        with self._command_lock, self.connection:
             self.connection.execute("UPDATE missions SET payload_json=?, state=?, updated_at=? WHERE id=?", (json.dumps(payload), payload["state"], now, mission_id))
 
     def create_command(self, user: UserInfo, request_id: UUID, target: str, payload: dict[str, object]) -> dict[str, object]:
@@ -258,9 +268,11 @@ class Storage:
     def expire_security(self) -> list[str]:
         """Remove elapsed leases/sessions and report causes once to the runtime watchdog."""
         now = _timestamp(self.clock())
-        with self.connection:
+        with self._command_lock:
             expired_leases = self.connection.execute("DELETE FROM control_leases WHERE expires_at <= ?", (now,)).rowcount
             expired_sessions = self.connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,)).rowcount
+            if self.connection.in_transaction:
+                self.connection.commit()
         reasons: list[str] = []
         if expired_leases:
             reasons.append("LEASE_EXPIRED")

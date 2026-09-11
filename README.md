@@ -41,7 +41,7 @@ mkdir -p ~/.local/state/control-platform
 | T04 | 카메라 그리드 | 완료 |
 | T05 | 정지·수동 조작·권한 | 완료 |
 | T06 | 편대·단일 목표 임무 | 완료(mock) |
-| T07 | 임무·알림 | 미구현 |
+| T07 | 경유점·순찰 | 완료(mock) |
 | T08 | 지도 센서 레이어 | 미구현 |
 | T09 | 설정·로봇 등록 | 미구현 |
 | T10 | 기록·검색 | 미구현 |
@@ -50,7 +50,7 @@ mkdir -p ~/.local/state/control-platform
 | T13 | 인증 강화·배포 | 미구현 |
 | T14 | 통합 인수·실물 검증 | 미구현 |
 
-T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드와 T06 편대·단일 목표 임무를 mock adapter 기준으로 완료했다. 현재 검증은 frontend 33 tests와 backend 56 tests를 통과했으며 실제 ROS 연동은 T12 범위다.
+T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰을 mock adapter 기준으로 완료했다. 현재 검증은 frontend 43 tests와 backend 66 tests를 통과했으며 실제 ROS 연동은 T12 범위다.
 
 새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. 단계별 증거는 `docs/tdd/`에 기록하며 설정·수집 실패와 실제 동작 assertion 실패를 구분한다.
 

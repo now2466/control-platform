@@ -2,7 +2,7 @@ export type UserSession = { user_id?: string; username: string; role: string }
 export type MapMetadata = { map_id: string; name: string; frame_id: string; resolution: number; width: number; height: number; origin: { x: number; y: number; yaw: number }; version: string; data_url: string }
 export type Goal = { x: number; y: number; yaw: number; frame_id: string }
 export type Formation = { state: string; master_id?: string | null; slave_id?: string | null; distance_m?: number | null; bearing_rad?: number | null; reason_code?: string | null }
-export type Mission = { mission_id: string; state: string; failure_code?: string | null; progress_distance_m?: number | null; waypoint_index?: number; waypoints?: Goal[] }
+export type Mission = { mission_id: string; state: string; failure_code?: string | null; progress_distance_m?: number | null; waypoint_index?: number; lap_index?: number; total_distance_m?: number | null; waypoints?: Goal[]; name?: string; repeat_count?: number; version?: number }
 
 async function errorMessage(response: Response, fallback: string) {
   try { const body = await response.json(); return body?.error?.message ?? body?.detail ?? fallback } catch { return fallback }
@@ -65,9 +65,9 @@ export async function formationAction(action: 'pair' | 'pause' | 'unpair' | 'rej
   return mutation('/api/v1/formation/actions', { action, master_id, slave_id, lease_id }, '편대 요청 실패')
 }
 
-export async function createMission(goal: Goal, map_id: string, lease_id: string): Promise<Mission> {
+export async function createMission(goal: Goal | Goal[], map_id: string, lease_id: string, name = '단일 목표 임무', repeat_count = 1): Promise<Mission> {
   if (!lease_id) throw new Error('제어권이 필요합니다.')
-  return mutation('/api/v1/missions', { name: '단일 목표 임무', map_id, waypoints: [goal], repeat_count: 1, lease_id }, '임무 생성 실패') as Promise<Mission>
+  return mutation('/api/v1/missions', { name, map_id, waypoints: Array.isArray(goal) ? goal : [goal], repeat_count, lease_id }, '임무 생성 실패') as Promise<Mission>
 }
 
 export async function missionAction(missionId: string, action: 'validate' | 'start' | 'pause' | 'resume' | 'cancel', lease_id: string) {
@@ -78,6 +78,17 @@ export async function missionAction(missionId: string, action: 'validate' | 'sta
 export async function getMission(missionId: string): Promise<Mission> {
   const response = await fetch(`/api/v1/missions/${missionId}`, { credentials: 'include' })
   if (!response.ok) throw new Error(await errorMessage(response, `임무 조회 실패 (${response.status})`))
+  return response.json() as Promise<Mission>
+}
+export async function listMissions(): Promise<Mission[]> {
+  const response = await fetch('/api/v1/missions', { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, '임무 목록 조회 실패'))
+  const value = await response.json() as { items?: Mission[] }
+  return value.items ?? []
+}
+export async function updateMission(id: string, waypoints: Goal[], name: string, repeat_count: number, version: number, lease_id: string) {
+  const response = await fetch(`/api/v1/missions/${id}`, { method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() }, body: JSON.stringify({ request_id: crypto.randomUUID(), waypoints, name, repeat_count, version, lease_id }) })
+  if (!response.ok) throw new Error(await errorMessage(response, '임무 저장 실패'))
   return response.json() as Promise<Mission>
 }
 

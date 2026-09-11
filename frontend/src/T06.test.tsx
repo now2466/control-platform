@@ -49,12 +49,13 @@ test('mission waits for queued command completion before refreshing state', asyn
   expect(fetchMock.mock.calls.slice(5).map(call => call[0])).toEqual(['/api/v1/missions/m1/actions', '/api/v1/commands/c-start', '/api/v1/commands/c-start', '/api/v1/missions/m1'])
 })
 
-test('mission command failure is shown and does not refresh mission', async () => {
+test('mission command failure refreshes FAILED mission and preserves failure details', async () => {
   const onError = vi.fn()
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(new Response(JSON.stringify({ mission_id: 'm1', state: 'DRAFT' }), { status: 201 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ command_id: 'c1' }), { status: 202 }))
     .mockResolvedValueOnce(new Response(JSON.stringify({ command_id: 'c1', state: 'FAILED', reason_code: 'FOLLOW_REJECTED' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ mission_id: 'm1', state: 'FAILED', failure_code: 'FOLLOW_REJECTED', waypoint_index: 1, waypoints: [{ x: 1, y: 2, yaw: 0, frame_id: 'map' }, { x: 2, y: 3, yaw: 0, frame_id: 'map' }, { x: 3, y: 4, yaw: 0, frame_id: 'map' }] }), { status: 200 }))
   vi.stubGlobal('crypto', { randomUUID: () => 'request-id' })
   vi.stubGlobal('fetch', fetchMock)
   render(<MissionPanel lease="lease-1" mapId="mock_lab" formation={{ state: 'READY' }} goal={{ x: 1, y: 2, yaw: 0, frame_id: 'map' }} onError={onError} />)
@@ -62,7 +63,10 @@ test('mission command failure is shown and does not refresh mission', async () =
   await screen.findByText(/DRAFT/)
   fireEvent.click(screen.getByText('검증'))
   await waitFor(() => expect(onError).toHaveBeenCalledWith('FOLLOW_REJECTED'))
-  expect(fetchMock.mock.calls.map(call => call[0])).not.toContain('/api/v1/missions/m1')
+  await waitFor(() => expect(screen.getByText(/임무 · FAILED/)).toBeInTheDocument())
+  expect(screen.getByTestId('mission-progress')).toHaveTextContent('현재 2/3')
+  expect(screen.getByRole('alert')).toHaveTextContent('FOLLOW_REJECTED')
+  expect(fetchMock.mock.calls.map(call => call[0])).toContain('/api/v1/missions/m1')
 })
 
 test('command polling reports a bounded timeout', async () => {
