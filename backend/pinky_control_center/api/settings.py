@@ -24,9 +24,14 @@ def create_router() -> APIRouter:
         return request.app.state.settings_service.current()
 
     @router.put("/settings", response_model=ActiveSettings)
-    async def put_settings(payload: SettingsUpdate, request: Request, _user: UserInfo = Depends(admin)) -> ActiveSettings:
+    async def put_settings(payload: SettingsUpdate, request: Request, user: UserInfo = Depends(admin)) -> ActiveSettings:
         try:
-            return await request.app.state.settings_service.update(ActiveSettings.model_validate(payload.model_dump(exclude={"request_id"})))
+            previous = request.app.state.settings_service.current()
+            updated = await request.app.state.settings_service.update(ActiveSettings.model_validate(payload.model_dump(exclude={"request_id"})))
+            request.app.state.storage.record_history_safe(event_type="SETTINGS_UPDATED", user=user, payload={"version": updated.version, "active_map_id": updated.active_map_id}, dedupe_key=f"settings:{updated.version}:user:{user.user_id}")
+            if updated.active_map_id != previous.active_map_id:
+                request.app.state.storage.record_history_safe(event_type="MAP_ACTIVATED", user=user, payload={"map_id": updated.active_map_id}, dedupe_key=f"map:{updated.active_map_id}:settings:{updated.version}")
+            return updated
         except SettingsConflict as error:
             raise HTTPException(status_code=409, detail="SETTINGS_VERSION_CONFLICT") from error
         except UnsafeSettingsChange as error:
@@ -43,9 +48,11 @@ def create_router() -> APIRouter:
         if not request.app.state.settings_service.initial_pose_allowed(robot_id):
             raise HTTPException(status_code=409, detail="ROBOT_NOT_STOPPED")
         try:
-            return request.app.state.command_dispatcher.submit(
+            result = request.app.state.command_dispatcher.submit(
                 user, payload.request_id, robot_id, "initial_pose", parameters={"pose": payload.pose.model_dump(mode="json")},
             )
+            request.app.state.storage.record_history_safe(event_type="INITIAL_POSE_REQUESTED", user=user, robot_id=robot_id, payload={"command_id": result["command_id"], "pose": payload.pose.model_dump(mode="json")}, dedupe_key=f"initial-pose:{result['command_id']}")
+            return result
         except ValueError as error:
             raise HTTPException(status_code=409, detail="REQUEST_ID_CONFLICT") from error
         except QueueFull as error:

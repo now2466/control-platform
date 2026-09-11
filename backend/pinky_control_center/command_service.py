@@ -72,7 +72,8 @@ class CommandDispatcher:
         command_id = uuid4()
         for target in ("robot_1", "robot_2"):
             try:
-                await self.adapter.execute(CommandRequest(command_id=command_id, robot_id=target, operation="stop", parameters={"reason": "WATCHDOG", "source_robot": robot_id}))
+                result = await self.adapter.execute(CommandRequest(command_id=command_id, robot_id=target, operation="stop", parameters={"reason": "WATCHDOG", "source_robot": robot_id}))
+                self.storage.record_history_safe(event_type="SAFETY_STOP", robot_id=target, payload={"source_robot": robot_id, "accepted": result.accepted}, dedupe_key=f"safety-stop:{command_id}:{target}")
             except Exception:
                 # A watchdog must complete its remaining safety work after one adapter fails.
                 continue

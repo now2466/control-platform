@@ -88,6 +88,8 @@ class MissionService:
     def _set_formation(self, state: FormationMode, reason: str | None = None) -> None:
         current = self.formation()
         self.state_store.formation_override = current.model_copy(update={"state": state, "reason_code": reason})
+        if current.state is not state or current.reason_code != reason:
+            self.storage.record_history_safe(event_type="FORMATION_CHANGED", robot_id=current.master_id, payload={"state": state.value, "reason_code": reason, "master_id": current.master_id, "slave_id": current.slave_id}, dedupe_key=f"formation:{state.value}:{reason or '-'}:{current.master_id}:{current.slave_id}")
 
     async def tick(self) -> None:
         if not self._tick_lock.acquire(blocking=False):
@@ -208,6 +210,7 @@ class MissionService:
         if action == "pair":
             distance = self.settings_provider().follow_distance_m
             self.state_store.formation_override = FormationState(state=FormationMode.READY, master_id=master, slave_id=slave, target_distance_m=distance, distance_m=distance, gap_error_m=0.)
+            self.storage.record_history_safe(event_type="FORMATION_CHANGED", robot_id=master, payload={"state": FormationMode.READY.value, "master_id": master, "slave_id": slave}, dedupe_key=f"formation:READY:{master}:{slave}")
         elif action == "unpair": self._set_formation(FormationMode.UNPAIRED)
         elif action == "pause":
             from pinky_control_center.models import CommandRequest

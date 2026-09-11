@@ -5,6 +5,8 @@ export type Formation = { state: string; master_id?: string | null; slave_id?: s
 export type Mission = { mission_id: string; state: string; failure_code?: string | null; progress_distance_m?: number | null; waypoint_index?: number; lap_index?: number; total_distance_m?: number | null; waypoints?: Goal[]; name?: string; repeat_count?: number; version?: number }
 export type MapSummary = { map_id: string; name: string; version: string }
 export type ActiveSettings = { version: number; active_map_id: string; follow_distance_m: number; follow_tolerance_m: number; max_linear_mps: number; max_angular_rps: number; camera_quality: 'low' | 'default' | 'high' }
+export type HistoryEvent = { event_id: number; event_type: string; robot_id?: string | null; mission_id?: string | null; occurred_at: string; payload: Record<string, unknown> }
+export type HistoryFilters = { event_type?: string; robot_id?: string; mission_id?: string; from?: string; to?: string }
 
 async function errorMessage(response: Response, fallback: string) {
   try { const body = await response.json(); return body?.error?.message ?? body?.detail ?? fallback } catch { return fallback }
@@ -120,6 +122,30 @@ export async function updateMission(id: string, waypoints: Goal[], name: string,
 
 export async function acknowledgeAlert(alertId: string) {
   return mutation(`/api/v1/alerts/${alertId}/ack`, {}, '경고 확인 실패') as Promise<{ alert_id: string; code: string; severity: string; state: string; message: string; occurrences: number; robot_id?: string | null; acknowledged_by?: string | null; acknowledged_at?: string | null }>
+}
+
+function historyQuery(filters: HistoryFilters, cursor?: number) {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) if (value) query.set(key, value)
+  if (cursor) query.set('cursor', String(cursor))
+  return query.toString()
+}
+
+export async function getHistory(filters: HistoryFilters = {}, cursor?: number): Promise<{ items: HistoryEvent[]; next_cursor: number | null }> {
+  const response = await fetch(`/api/v1/history${historyQuery(filters, cursor) ? `?${historyQuery(filters, cursor)}` : ''}`, { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, '이력 조회 실패'))
+  return response.json() as Promise<{ items: HistoryEvent[]; next_cursor: number | null }>
+}
+
+export async function downloadHistory(filters: HistoryFilters = {}) {
+  const query = historyQuery(filters)
+  const response = await fetch(`/api/v1/history/export${query ? `?${query}` : ''}`, { credentials: 'include' })
+  if (!response.ok) throw new Error(await errorMessage(response, '이력 JSON 다운로드 실패'))
+  const blob = await response.blob()
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL ? URL.createObjectURL(blob) : `data:application/json;charset=utf-8,${encodeURIComponent(await blob.text())}`
+  link.download = 'history.json'; link.click()
+  if (URL.revokeObjectURL && link.href.startsWith('blob:')) URL.revokeObjectURL(link.href)
 }
 
 type CommandResult = { command_id: string; state: string; reason_code?: string | null; error_code?: string | null }

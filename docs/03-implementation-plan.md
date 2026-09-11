@@ -185,16 +185,17 @@ SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환
 
 검증: `python -m pytest backend/tests/test_t09_settings.py -q`, 전체 backend/frontend test 및 frontend production build.
 
-### T10 — 기록·이력·내보내기 (R13, N10, N11)
+### T10 — 기록·이력·내보내기 (R13, N10, N11) — 구현 완료
 
-파일: storage.py, api/history.py, HistoryPage.tsx, test_history.py.
+파일: storage.py, api/history.py, HistoryPanel.tsx, test_t10_history.py.
 
-- [ ] 5Hz telemetry, 명령·결과·이벤트·알림 저장과 인덱스를 구현한다.
-- [ ] 로봇/임무/시간 필터와 cursor 페이지, CSV/JSON 다운로드를 구현한다.
-- [ ] UTC 저장·KST 표시, CSV 셀 수식 시작 문자 무해화, 24시간 export 제한을 검증한다.
-- [ ] 저장 실패는 경고·기록 장애 상태로 노출하고 정지 실행이 DB 실패에 막히지 않게 한다. 정지 감사 이벤트는 복구 후 보충한다.
+- [x] 명령·결과·임무·편대·알림·설정 이벤트와 필요한 인덱스를 저장한다. 5Hz telemetry는 저장하지 않는다.
+- [x] robot/mission/UTC/event type/cursor 필터와 JSON 다운로드를 제공한다. CSV는 제외한다.
+- [x] UTC 저장과 KST 화면 표시, 기본 24시간·최대 30일 export window를 검증한다.
+- [x] SQLite 30일 운용 이벤트와 owner-scoped event/robot/mission/UTC/cursor 조회, JSON export를 제공한다. 고속 telemetry·Scan/costmap·path·camera frame과 CSV/분석은 저장하지 않는다.
+- [x] 감사 write 실패는 `audit history degraded` 로그만 남기며 adapter 보호 정지와 제어 실행을 막지 않는다.
 
-검증: `python -m pytest backend/tests/test_history.py -q`. 임무 생성부터 취소까지 request_id로 결과를 추적할 수 있어야 한다.
+검증: `cd backend && .venv/bin/python -m pytest tests/test_t10_history.py -q`, 전체 backend/frontend test 및 frontend production build.
 
 ### T11 — 영상 기록·동기 재생 — 범위 제외
 

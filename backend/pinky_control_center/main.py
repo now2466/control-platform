@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pinky_control_center.adapters.mock import MockRobotAdapter
-from pinky_control_center.api import alerts, cameras, control, maps, missions, sensors, session, state, settings
+from pinky_control_center.api import alerts, cameras, control, history, maps, missions, sensors, session, state, settings
 from pinky_control_center.auth import current_user, verify_mutation
 from pinky_control_center.config import load_mock_config
 from pinky_control_center.models import FormationMode, MockScenario, MockScenarioRequest, UserInfo, UserRole
@@ -148,6 +148,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.include_router(settings.create_router())
     app.include_router(cameras.create_router(camera_service))
     app.include_router(alerts.router)
+    app.include_router(history.router)
     app.include_router(sensors.router)
 
     @app.exception_handler(StarletteHTTPException)

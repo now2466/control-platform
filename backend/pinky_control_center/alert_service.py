@@ -45,6 +45,7 @@ class AlertService:
         alert = self.storage.acknowledge_alert(alert_id, username)
         if alert is not None:
             self._alerts[(alert.code, alert.robot_id)] = alert
+            self.storage.record_history_safe(event_type="ALERT_ACK", robot_id=alert.robot_id, mission_id=str(alert.mission_id) if alert.mission_id else None, payload={"alert_id": str(alert.alert_id), "code": alert.code, "acknowledged_by": username}, dedupe_key=f"alert:{alert.alert_id}:ack:{alert.acknowledged_at.isoformat() if alert.acknowledged_at else username}")
         return alert
 
     def _condition(self, code: str, robot_id: str | None, severity: AlertSeverity, message: str, active: bool, *, activate_after: timedelta = timedelta(0), clear_after: timedelta = timedelta(seconds=3), clear_when: bool | None = None) -> Alert | None:
@@ -62,6 +63,7 @@ class AlertService:
                               first_seen_at=(current.first_seen_at if current else now), last_seen_at=now,
                               acknowledged_at=None, acknowledged_by=None)
                 self._alerts[key] = self.storage.upsert_alert(alert)
+                self.storage.record_history_safe(event_type="ALERT_ACTIVE", robot_id=robot_id, mission_id=str(alert.mission_id) if alert.mission_id else None, payload={"alert_id": str(alert.alert_id), "code": code, "severity": severity.value, "message": message}, dedupe_key=f"alert:{alert.alert_id}:active:{alert.occurrences}")
                 return alert
             self._active_since.pop(key, None)
             # Deduplicate UI events: repeated observations only refresh last_seen.
@@ -76,6 +78,7 @@ class AlertService:
             return None
         alert = current.model_copy(update={"state": AlertState.RESOLVED, "last_seen_at": now})
         self._alerts[key] = self.storage.upsert_alert(alert)
+        self.storage.record_history_safe(event_type="ALERT_RESOLVED", robot_id=robot_id, mission_id=str(alert.mission_id) if alert.mission_id else None, payload={"alert_id": str(alert.alert_id), "code": code, "severity": alert.severity.value}, dedupe_key=f"alert:{alert.alert_id}:resolved:{alert.last_seen_at.isoformat()}")
         self._clear_since.pop(key, None)
         return None
 
