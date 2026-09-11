@@ -104,7 +104,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
                 alert_service.record_command_rejection(event.robot_id, event.payload.get("reason_code") if isinstance(event.payload.get("reason_code"), str) else None)
         newly_active = alert_service.evaluate(state_store.snapshot())
         for alert in newly_active:
-            if alert.code in {"FOLLOW_LOST", "TF_INVALID", "SENSOR_ERROR", "BATTERY_CRITICAL"}:
+            if alert.code in {"COMMUNICATION_LOSS", "COMMUNICATION_STALE", "FOLLOW_LOST", "TF_INVALID", "NAVIGATION_SENSOR_ERROR", "BATTERY_CRITICAL"}:
                 await mission_service.protective_pause(alert.code)
         await mission_service.tick()
         for robot_id in teleop_service.tick():

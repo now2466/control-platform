@@ -59,7 +59,8 @@ class AlertService:
                     return None
                 alert = Alert(alert_id=(current.alert_id if current else uuid4()), code=code, robot_id=robot_id, severity=severity, state=AlertState.ACTIVE,
                               occurrences=(current.occurrences + 1 if current else 1), message=message,
-                              first_seen_at=(current.first_seen_at if current else now), last_seen_at=now)
+                              first_seen_at=(current.first_seen_at if current else now), last_seen_at=now,
+                              acknowledged_at=None, acknowledged_by=None)
                 self._alerts[key] = self.storage.upsert_alert(alert)
                 return alert
             self._active_since.pop(key, None)
@@ -99,7 +100,8 @@ class AlertService:
                 if sensor.state is SensorState.UNSUPPORTED:
                     continue
                 label = sensor.name
-                add("SENSOR_ERROR", robot.robot_id, AlertSeverity.CRITICAL, f"필수 센서 {label} 상태가 ERROR입니다.", sensor.state is SensorState.ERROR)
+                error_code = "NAVIGATION_SENSOR_ERROR" if label in {"scan", "odom", "local_costmap", "global_costmap", "control"} else "SENSOR_ERROR"
+                add(error_code, robot.robot_id, AlertSeverity.CRITICAL, f"필수 센서 {label} 상태가 ERROR입니다.", sensor.state is SensorState.ERROR)
                 add("SENSOR_STALE", robot.robot_id, AlertSeverity.WARNING, f"센서 {label} 데이터가 지연되었습니다.", sensor.state is SensorState.STALE)
         add = lambda *args, **kwargs: created.append(alert) if (alert := self._condition(*args, **kwargs)) is not None else None
         add("FOLLOW_LOST", "robot_2", AlertSeverity.CRITICAL, "슬레이브 추종 상태가 LOST입니다.", snapshot.formation.state is FormationMode.LOST)

@@ -15,6 +15,7 @@ class MissionService:
         self.active_id: str | None = None
         self.slave_wait_deadline: float | None = None
         self.formation_pause_pending: tuple[str, str] | None = None
+        self.formation_pause_reason: str | None = None
         self._tick_lock = threading.Lock()
         # Recovery never resumes motion. Persisted in-flight missions need operator action.
         import json
@@ -52,6 +53,7 @@ class MissionService:
             except Exception:
                 pass
         self.formation_pause_pending = (master, slave)
+        self.formation_pause_reason = reason
 
     def consume_adapter_event(self, event) -> None:
         """Small adapter-result boundary shared by mock now and ROS event ingestion later."""
@@ -87,8 +89,12 @@ class MissionService:
             master, slave = self.formation_pause_pending
             robots = {robot.robot_id: robot for robot in self.state_store.snapshot().robots}
             if all(robots[robot_id].stop_latched and robots[robot_id].pose_freshness == Freshness.FRESH and abs(robots[robot_id].linear_mps or 0) < .01 and abs(robots[robot_id].angular_rps or 0) < .02 for robot_id in (master, slave)):
-                self._set_formation(FormationMode.PAUSED)
+                if self.formation_pause_reason == "FOLLOW_LOST":
+                    self._set_formation(FormationMode.LOST, "FOLLOW_LOST")
+                else:
+                    self._set_formation(FormationMode.PAUSED, self.formation_pause_reason)
                 self.formation_pause_pending = None
+                self.formation_pause_reason = None
         if not self.active_id:
             return
         mission_id = self.active_id
@@ -131,7 +137,7 @@ class MissionService:
             return
         source = self.state_store.snapshot_source()
         source_formation = source.formation
-        if source_formation.state == FormationMode.LOST and mission["state"] in {"RUNNING", "STARTING"}:
+        if source_formation.state == FormationMode.LOST and self.formation_pause_pending is None and mission["state"] in {"RUNNING", "STARTING"}:
             mission["state"] = "PAUSING"; mission["failure_code"] = "FOLLOW_LOST"
             self._set_formation(FormationMode.LOST, "FOLLOW_LOST")
             for robot_id in ("robot_1", "robot_2"):
@@ -201,6 +207,7 @@ class MissionService:
                 self._set_formation(FormationMode.ERROR, "STOP_UNCONFIRMED")
                 return False, {"reason_code": "STOP_UNCONFIRMED"}
             self.formation_pause_pending = (master, slave)
+            self.formation_pause_reason = None
         elif action == "rejoin":
             self._set_formation(FormationMode.REJOINING)
             from pinky_control_center.models import CommandRequest

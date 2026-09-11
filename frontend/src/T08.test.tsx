@@ -31,3 +31,24 @@ test('selected robot scan and costmap overlays fetch once and show unsupported s
   await waitFor(() => expect(fetchMock.mock.calls.some(call => call[0] === '/api/v1/robots/robot_2/sensor-layers')).toBe(true))
   expect(screen.getByText(/지원하지 않음/)).toBeTruthy()
 })
+
+test('changing selection clears old sensor layers and ignores a mismatched response', async () => {
+  let resolveSecond: ((value: Response) => void) | undefined
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+    const url = String(input)
+    if (!url.includes('/sensor-layers')) return Promise.resolve(new Response(JSON.stringify(metadata), { status: 200 }))
+    if (url.includes('robot_1')) return Promise.resolve(new Response(JSON.stringify({ robot_id: 'robot_1', scan: { state: 'OK', rays: [{ angle_rad: 0, range_m: 1 }] }, costmaps: [] }), { status: 200 }))
+    return new Promise<Response>(resolve => { resolveSecond = resolve })
+  })
+  const { rerender } = render(<MapPanel robots={[robot, { ...robot, robot_id: 'robot_2', name: 'Pinky Slave', role: 'SLAVE' as const }]} selected="robot_1" mapId="mock_lab" onSelect={() => {}} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Scan' }))
+  await waitFor(() => expect(screen.getByText(/Scan · OK/)).toBeTruthy())
+  expect(document.querySelectorAll('.scan-layer line').length).toBe(1)
+  rerender(<MapPanel robots={[robot, { ...robot, robot_id: 'robot_2', name: 'Pinky Slave', role: 'SLAVE' as const }]} selected="robot_2" mapId="mock_lab" onSelect={() => {}} />)
+  expect(screen.getByText(/상태 확인 중/)).toBeTruthy()
+  expect(document.querySelectorAll('.scan-layer line').length).toBe(0)
+  resolveSecond?.(new Response(JSON.stringify({ robot_id: 'robot_1', scan: { state: 'OK', rays: [{ angle_rad: 0, range_m: 1 }] }, costmaps: [] }), { status: 200 }))
+  await waitFor(() => expect(fetchMock.mock.calls.some(call => call[0] === '/api/v1/robots/robot_2/sensor-layers')).toBe(true))
+  expect(screen.getByText(/상태 확인 중/)).toBeTruthy()
+  expect(document.querySelectorAll('.scan-layer line').length).toBe(0)
+})
