@@ -5,7 +5,7 @@
 ## 1. 화면과 상호작용
 
 ```text
-┌ 연결 상태 / LIVE·MOCK·REPLAY / 로그인 사용자 / 제어권 / 전체 긴급정지 ┐
+┌ 연결 상태 / LIVE·MOCK / 로그인 사용자 / 제어권 / 전체 긴급정지 ┐
 ├─────────────────────────────────────┬─────────────────────┤
 │ 공통 지도: 두 로봇·경로·목표·궤적    │ robot_1 상태 카드   │
 │ 줌 / 전체 보기 / 로봇 따라보기       │ robot_2 상태 카드   │
@@ -15,7 +15,7 @@
 │ 마스터 카메라     │ 슬레이브 카메라  │ 수동 조작           │
 │ 이름·FPS·신선도   │ 이름·FPS·신선도  │                     │
 ├──────────────────┴──────────────────┴─────────────────────┤
-│ 최신 경고 / 이벤트 타임라인 / 이력·재생·설정으로 이동      │
+│ 최신 경고 / 이벤트 타임라인 / 이력·설정으로 이동           │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -26,7 +26,7 @@
 - 지도 셀 원점의 위치·회전을 적용해 world↔canvas 변환을 수행한다. 화면 y축 반전과 줌/팬의 역변환을 포함한다. 점유/미상 셀은 기본 목표 지정 불가, 로봇 footprint 통과 가능성은 Nav2 결과로 판정한다.
 - TF가 없으면 마지막 위치를 회색으로 남기고 경과 시간을 표시한다. TF 없는 두 위치로 상대 거리를 계산하지 않는다.
 - 영상은 로봇별 독립 로딩·재연결. 2초간 새 프레임이 없으면 영상 위 `영상 지연/끊김` 오버레이, 5초 후 마지막 영상을 가린다. 다른 로봇 영상으로 대체하지 않는다.
-- 확대 보기에도 선택 로봇 이름과 긴급정지 접근성을 유지한다. 재생 화면에서는 `실시간으로 돌아가기`를 제공한다. 재생 중 긴급정지는 별도 LIVE 대상 영역에서만 가능하고 재생 시간축 명령은 전송하지 않는다.
+- 확대 보기에도 선택 로봇 이름과 긴급정지 접근성을 유지한다.
 - 설정과 로그는 별도 화면으로 제공하되 헤더 긴급정지는 유지한다.
 
 ## 2. 구조와 실행 방식
@@ -34,7 +34,7 @@
 ```mermaid
 flowchart LR
   UI[React 관제 화면] <-->|REST / 상태 WS / 프레임 WS| API[FastAPI 관제 서버]
-  API --> DB[(SQLite / 녹화 파일)]
+  API --> DB[(SQLite)]
   API <--> Adapter[RobotAdapter: Mock 또는 ROS]
   Adapter <--> M[마스터 Nav2 / 상태 / 카메라]
   Adapter <--> S[슬레이브 추종 / 상태 / 카메라]
@@ -150,9 +150,6 @@ type Command = {
 | GET `/events/export` | 동일 필터,format(csv/json) | 다운로드; 최대 24시간 단위 |
 | GET/PUT `/settings` | PUT:request_id,version,values | 설정 및 version; 관리자만 수정 |
 | POST `/robots/{id}/accessories` | request_id,device(led/lamp/emotion),values | 장치별 스키마 검증 후 command |
-| POST `/recordings` | request_id,mission_id,enabled | 기록 시작/중지 상태 |
-| GET `/recordings/{mission_id}/timeline` | from,to | 위치·상태·이벤트·영상 구간 목록 |
-| GET `/recordings/{mission_id}/frames/{robot_id}/{frame_id}` | 없음 | 인증된 JPEG 파일, 없으면 404 |
 
 PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 적용 실패 시 활성 버전은 이전 값을 유지하고 실패 결과를 반환한다. 편대 양쪽에 영향을 주는 변경은 정지 상태에서만 수행하며 한쪽만 적용되면 편대 시작을 차단하고 기존 값 복원을 시도한다.
 
@@ -246,12 +243,10 @@ ControlCommand operation은 stop/reset_stop/set_mode/apply_settings만 허용하
 
 동일 code+robot_id의 활성 알림은 하나로 유지하며 occurrences와 last_seen 갱신. 확인(ACK)은 소리만 억제하고 원인 해소를 대신하지 않는다. 일반 센서 경고는 정상 3초 유지 시 해소. 알림 팝업은 긴급정지 버튼을 가리지 않는다.
 
-## 8. 저장·재생·운영
+## 8. 저장·운영
 
-SQLite WAL, schema migration version을 둔다. 테이블: users(id,username,password_hash,role), robots(id,config_json), missions(id,state,payload_json,created_at,updated_at), commands(id,request_id,user_id,payload_hash,target,state,payload_json,result_json,created_at,updated_at), events(id,robot_id,mission_id,kind,payload_json,recorded_at), alerts(id,code,robot_id,state,payload_json), telemetry(id,robot_id,mission_id,source_at,received_at,payload_json), settings(version,values_json,applied_at), frames(id,mission_id,robot_id,captured_at,received_at,path). commands에 (user_id,request_id) unique, 조회 필터의 mission_id/robot_id/time index를 만든다.
+SQLite WAL, schema migration version을 둔다. 테이블: users(id,username,password_hash,role), robots(id,config_json), missions(id,state,payload_json,created_at,updated_at), commands(id,request_id,user_id,payload_hash,target,state,payload_json,result_json,created_at,updated_at), events(id,robot_id,mission_id,kind,payload_json,recorded_at), alerts(id,code,robot_id,state,payload_json), telemetry(id,robot_id,mission_id,source_at,received_at,payload_json), settings(version,values_json,applied_at). commands에 (user_id,request_id) unique, 조회 필터의 mission_id/robot_id/time index를 만든다.
 
-위치·편대 telemetry는 5Hz, 배터리는 수신 시, 이벤트·명령은 전량 저장한다. 영상 기록은 기본 OFF, 임무에 연결해 켜면 로봇당 최대 5FPS JPEG 파일과 시각 인덱스를 기록한다. 실시간 10FPS와 녹화 5FPS는 별개다. 쓰기는 임시 파일 후 원자 rename, 완료 파일만 DB 등록한다. 파일 경로는 서버가 생성하고 임의 사용자 경로를 받지 않는다.
-
-재생은 관제 received_at을 공통 시간축으로 사용하고 source time이 동기화되었을 때 촬영시각을 보조 표시한다. 선택 시각 이하 가장 가까운 프레임을 사용하되 500ms 넘게 차이 나면 영상 공백, 위치 1초 이상 간격은 보간하지 않는다. 영상이 없는 임무도 궤적·이벤트 재생 가능하다. 기록 중단·보존 만료는 시간축에 표시한다.
+위치·편대 telemetry는 필요한 운용 이력 범위에서 저장하고 배터리는 수신 시, 이벤트·명령은 전량 저장한다. 카메라는 T04의 실시간 스트림만 제공하며 JPEG 파일 녹화, 프레임 인덱스, 동기 재생 API는 구현하지 않는다.
 
 운영 환경은 정적 UI와 API를 같은 출처의 TLS 리버스 프록시로 노출하고 ROS DDS는 내부 LAN으로 제한한다. 제어 POST는 CSRF 토큰과 Origin 검증, WS는 세션·Origin 검증. 로그인은 사용자/IP별 5회/분 제한. 비밀번호는 검증된 해시 라이브러리 사용, 기본 하드코딩 계정은 금지한다. 시스템 서비스 재시작은 상태 조회를 복구할 뿐 주행을 재개하지 않는다.

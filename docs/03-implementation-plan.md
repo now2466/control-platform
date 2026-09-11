@@ -11,7 +11,7 @@
 - 모든 제어는 서버에서 대상 ID, 권한, lease, 상태, 값 범위를 검증한다.
 - ROS 이름은 설정으로 매핑한다. mock은 ROS 없이 실행하며 ros 모드 장애를 mock으로 숨기지 않는다.
 - UI에 작업 중/완료/실패를 명시한다. 실제 수신 확인 없는 성공 표시는 금지한다.
-- T01~T14 전체가 최종 범위다. MVP 이후 작업을 누락하지 않는다.
+- T01~T10과 T12~T14가 최종 범위다. T11 영상 기록·동기 재생은 사용자 결정으로 제외한다.
 - 테스트는 위험한 상태 전이·좌표·중복 명령·끊김·기록 경계를 중심으로 작성한다.
 - 기존 웹 서버는 참고만 하고 새 패키지에서 구현한다. 하드웨어 드라이버 변경은 T12에서 실제 연결 조사 후 필요한 범위만 수행한다.
 
@@ -34,7 +34,7 @@ backend/
     adapters/base.py, adapters/mock.py, adapters/ros.py
     state_store.py, command_service.py, formation_service.py
     mission_service.py, safety_service.py, alert_service.py
-    camera_service.py, recording_service.py, replay_service.py
+    camera_service.py
     settings_service.py, map_service.py, accessory_service.py
     auth.py, storage.py, migrations/001_initial.sql
     api/session.py, api/state.py, api/control.py, api/missions.py
@@ -54,9 +54,9 @@ frontend/
   src/features/control/StopBar.tsx, TeleopPanel.tsx
   src/features/missions/MissionPanel.tsx
   src/features/alerts/AlertList.tsx
-  src/features/history/HistoryPage.tsx, ReplayPage.tsx
+  src/features/history/HistoryPage.tsx
   src/features/settings/SettingsPage.tsx
-  tests/dashboard.spec.ts, safety.spec.ts, missions.spec.ts, replay.spec.ts
+  tests/dashboard.spec.ts, safety.spec.ts, missions.spec.ts
 deployment/
   control-center.service, reverse-proxy.conf, env.example
 docs/
@@ -194,16 +194,9 @@ class RobotAdapter(Protocol):
 
 검증: `python -m pytest backend/tests/test_history.py -q`. 임무 생성부터 취소까지 request_id로 결과를 추적할 수 있어야 한다.
 
-### T11 — 영상 기록·동기 재생 (R14, N10)
+### T11 — 영상 기록·동기 재생 — 범위 제외
 
-파일: recording_service.py, replay_service.py, api/history.py, ReplayPage.tsx, test_history.py, replay.spec.ts.
-
-- [ ] opt-in 녹화 5FPS, 파일/DB 인덱스, 7일/10GB 한도와 2GB 잔여 기준을 구현한다.
-- [ ] 공통 received_at 시간축, 프레임 500ms 공백·위치 1초 공백, 재생 배속·탐색을 구현한다.
-- [ ] 미녹화·삭제된 구간을 오류 없이 표시하고 파일 유실을 경고한다.
-- [ ] 재생 조작에서 실물 명령 API가 호출되지 않는 것을 spy로 검증한다. 별도 LIVE 긴급정지만 명시적 대상으로 허용한다.
-
-검증: test_history.py 및 `npx playwright test tests/replay.spec.ts`. 두 로봇 서로 다른 프레임 시각으로 정렬 정확성을 확인한다.
+2026-09-11 사용자 결정으로 제외했다. T04 실시간 카메라 그리드, FPS·프레임 경과·중단·재연결 표시는 유지한다. 녹화 파일, 프레임 DB, 보존 용량 정책과 동기 재생 화면/API는 구현하지 않는다.
 
 ### T12 — 로봇별 rosbridge·ROS 2 인터페이스 연동 (전체 기능의 실물 기반)
 
@@ -241,7 +234,7 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 파일: acceptance-report.md, 기존 테스트 확장.
 
 - [ ] 아래 인수 시나리오를 mock에서 전부 실행하고 실물 가능 항목을 현장 담당과 수행한다.
-- [ ] 지도+영상 2개+기록 동시 부하로 p95/실제 FPS/메모리/큐·디스크를 측정한다.
+- [ ] 지도+실시간 영상 2개 동시 부하로 p95/실제 FPS/메모리/큐를 측정한다.
 - [ ] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 표로 작성한다.
 - [ ] 실패 항목을 수정한 후 해당 검증을 재실행한다. 하드웨어 미검증은 NOT_RUN으로 남긴다.
 
@@ -260,9 +253,9 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 | A09 | 3지점 2회 순찰·일시정지·재개 | 순서/회차 일치, 중간 실패를 성공으로 건너뛰지 않음 |
 | A10 | 위치 stale, 배터리 정상 5초 주기 | 위치만 stale, 배터리 잘못된 오프라인 판정 없음 |
 | A11 | 지도 원점 회전·확대 후 클릭 | world 목표 좌표 정확, 지도/카메라 로봇 선택 일치 |
-| A12 | 이력 필터·녹화 재생·공백 탐색 | 이벤트·두 궤적·영상 정렬, 공백 표시, 실물 명령 없음 |
+| A12 | 이력 필터·JSON/CSV 내보내기 | 명령·임무·알림을 조건에 맞게 조회하고 안전하게 내보냄 |
 | A13 | 다른 사용자 제어·관찰자 POST | 제어권 충돌 409/권한 403, 운영자 긴급정지는 허용 |
-| A14 | 서버 재시작·디스크 부족 | 임무 PAUSED, 자동 출발 없음, 기록 중단 경고, 정지 경로 유지 |
+| A14 | 서버 재시작·DB 저장 장애 | 임무 PAUSED, 자동 출발 없음, 기록 장애 경고, 정지 경로 유지 |
 | A15 | 두 namespace와 TF·실제 카메라 확인 | 데이터/명령 교차 없음, 공통 좌표 기반 간격 |
 | A16 | 지도/설정/LED 변경·미지원 서비스 | 정지 조건·버전 검사, 수락과 완료 구별, 미지원 표시 |
 
@@ -276,7 +269,7 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 |---|---|---|---|
 | 기반·화면 | T01~T04 | 5~7일 | 두 로봇 모의 지도·영상 대시보드 |
 | 제어·임무 | T05~T07 | 5~8일 | 정지·추종·단일/순찰 임무 |
-| 운영 기능 | T08~T11 | 6~9일 | 알림·설정·이력·동기 재생 |
+| 운영 기능 | T08~T10 | 4~6일 | 알림·설정·운용 이력 |
 | 실물·배포·인수 | T12~T14 | 7~11일 | 연동 보고서·실행 문서·인수 결과 |
 
 T12의 인터페이스 조사는 T01 직후 시작해 로봇 담당에게 계약을 전달할 수 있다. 본격 ROS 연동은 mock 제어 검증 후 수행한다. MVP는 T01~T06, T08의 핵심 알림 및 T12의 해당 실물 연동을 통과한 상태이며, 전체 범위 완료와 구분한다.
@@ -290,15 +283,15 @@ T12의 인터페이스 조사는 T01 직후 시작해 로봇 담당에게 계약
 | R09/R10/R18 | T02/T05/T12 |
 | R11/R12 | T08/T12 |
 | R13 | T10 |
-| R14 | T11 |
+| R14 | 범위 제외(T11) |
 | R15/R16/R17 | T09/T12 |
 | R19 | T01 및 각 기능 mock 시나리오 |
 | N01/N02/N07/N08 | T03/T04/T14 |
 | N03/N06 | T05/T12/T14 |
 | N04/N05 | T02/T07/T13/T14 |
 | N09 | T02/T13/T14 |
-| N10/N11 | T10/T11/T14 |
+| N10/N11 | T10/T14 |
 
 ## 7. 최종 완료 정의
 
-모든 R/N 항목에 검증 증거가 있고 mock/ROS/실물 결과를 구별해 인수 보고서를 제출한다. 모든 예정 화면·API·설정·테스트·실행 문서를 제공한다. 실물 카메라/추종/정지 계약 미충족을 숨기지 않는다. 남은 항목이 있는 경우 구현 완료 범위와 정확한 외부 의존성을 명시한다.
+범위 제외로 기록한 항목을 뺀 모든 R/N 항목에 검증 증거가 있고 mock/ROS/실물 결과를 구별해 인수 보고서를 제출한다. 모든 예정 화면·API·설정·테스트·실행 문서를 제공한다. 실물 카메라/추종/정지 계약 미충족을 숨기지 않는다. 남은 항목이 있는 경우 구현 완료 범위와 정확한 외부 의존성을 명시한다.
