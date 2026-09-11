@@ -14,6 +14,8 @@ class StateStore:
         self.clock = clock or (lambda: datetime.now(UTC))
         self.sequence = 0
         self.disconnected: set[str] = set()
+        self.formation_override: FormationState | None = None
+        self.active_mission: object | None = None
 
     def disconnect(self, robot_id: str) -> None:
         self.disconnected.add(robot_id)
@@ -22,11 +24,11 @@ class StateStore:
         now = self.clock()
         source = self.snapshot_source()
         robots = [self._offline(robot) if robot.robot_id in self.disconnected else self._fresh_robot(robot, now) for robot in source.robots]
-        formation = source.formation
+        formation = self.formation_override or source.formation
         if any(not robot.tf_valid or robot.pose is None for robot in robots):
             formation = formation.model_copy(update={"distance_m": None, "gap_error_m": None, "bearing_rad": None})
         self.sequence += 1
-        return source.model_copy(update={"robots": robots, "formation": formation, "seq": self.sequence, "server_time": now})
+        return source.model_copy(update={"robots": robots, "formation": formation, "active_mission": self.active_mission, "seq": self.sequence, "server_time": now})
 
     @staticmethod
     def _offline(robot: RobotState) -> RobotState:

@@ -143,12 +143,12 @@ class RobotAdapter(Protocol):
 
 파일: formation_service.py, mission_service.py, api/missions.py, FormationPanel.tsx, MissionPanel.tsx, test_formation.py, test_missions.py, missions.spec.ts.
 
-- [ ] 명세 상태 전이를 표 기반으로 구현하고 불가능한 전이를 409로 거부한다.
-- [ ] pair → 추종 준비 → 마스터 목표 순서를 보장한다. 슬레이브 준비 거절 시 마스터 goal 전송 0회를 검증한다.
-- [ ] 목표 미리보기·진행·도착, 간격·방위각, 이탈·재합류와 일시정지를 구현한다.
-- [ ] 마스터만 도착했을 때 임무 성공을 보류하고 슬레이브 최종 정지 확인/10초 제한을 적용한다.
+- [x] 명세 상태 전이를 표 기반으로 구현하고 불가능한 전이를 409로 거부한다.
+- [x] pair → 추종 준비 → 마스터 목표 순서를 보장한다. 슬레이브 준비 거절 시 마스터 goal 전송 0회를 검증한다.
+- [x] 목표 미리보기·진행·도착, 간격·방위각, 이탈·재합류와 일시정지를 구현한다.
+- [x] 마스터만 도착했을 때 임무 성공을 보류하고 슬레이브 최종 정지 확인/10초 제한을 적용한다.
 
-검증: test_formation.py/test_missions.py 및 missions.spec.ts. 정상·거절·이탈·재합류 실패를 각각 재현한다.
+검증: backend 56 tests, frontend 33 tests와 production build. pair/거절/이탈·재합류 실패/일시정지와 단일 목표 임무의 create → validate → start 흐름을 mock adapter와 DOM/API 테스트로 재현한다. 실제 ROS action·TF·정지 연동은 T12에서 검증한다.
 
 ### T07 — 경유점·순찰 (R07)
 

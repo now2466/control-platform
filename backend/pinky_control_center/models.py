@@ -62,6 +62,7 @@ class FormationMode(StrEnum):
     UNPAIRED = "UNPAIRED"
     READY = "READY"
     FOLLOWING = "FOLLOWING"
+    PAUSING = "PAUSING"
     PAUSED = "PAUSED"
     LOST = "LOST"
     REJOINING = "REJOINING"

@@ -3,11 +3,11 @@ import { mapMetadata, MapMetadata } from './api'
 import { canvasToWorld, centerViewOnWorld, isFreeOccupancyCell, MapInfo, staleAgeLabel, View, worldToCanvas, worldYawToCanvas } from './transforms'
 
 type Point = { x: number; y: number }
-type Goal = Point & { yaw: number; frame_id: string }
+export type Goal = Point & { yaw: number; frame_id: string }
 type Robot = { robot_id: string; name: string; role: 'MASTER' | 'SLAVE'; pose?: { x: number; y: number; yaw: number } | null; pose_freshness?: string; trail?: Point[]; path?: Point[]; goal?: Goal | null; tf_valid?: boolean; tf_reason_code?: string | null; received_at?: string | null }
 const fallback: MapInfo = { width: 1, height: 1, resolution: 1, origin: { x: 0, y: 0, yaw: 0 } }
 
-export default function MapPanel({ robots, selected, mapId, onSelect }: { robots: Robot[]; selected: string; mapId?: string | null; onSelect: (id: string) => void }) {
+export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChange }: { robots: Robot[]; selected: string; mapId?: string | null; onSelect: (id: string) => void; onGoalChange?: (goal: Goal | null) => void }) {
   const [metadata, setMetadata] = useState<MapMetadata | null>(null)
   const [error, setError] = useState('')
   const [view, setView] = useState<View>({ scale: 1, offsetX: 0, offsetY: 0 })
@@ -53,7 +53,9 @@ export default function MapPanel({ robots, selected, mapId, onSelect }: { robots
     const world = canvasToWorld(from, map, view)
     if (!cellIsFree(world)) { setCellError('점유 또는 미상 셀에는 목표를 지정할 수 없습니다.'); return }
     const direction = canvasToWorld(to, map, view)
-    setPreview({ ...world, yaw: Math.atan2(direction.y - world.y, direction.x - world.x), frame_id: metadata.frame_id })
+    const goal = { ...world, yaw: Math.atan2(direction.y - world.y, direction.x - world.x), frame_id: metadata.frame_id }
+    setPreview(goal)
+    onGoalChange?.(goal)
     setCellError('')
   }
   const loadOccupancy = (event: SyntheticEvent<SVGImageElement>) => {

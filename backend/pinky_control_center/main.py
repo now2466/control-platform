@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pinky_control_center.adapters.mock import MockRobotAdapter
-from pinky_control_center.api import cameras, control, maps, session, state
+from pinky_control_center.api import cameras, control, maps, missions, session, state
 from pinky_control_center.auth import current_user, verify_mutation
 from pinky_control_center.config import load_mock_config
 from pinky_control_center.models import MockScenario, MockScenarioRequest, UserInfo, UserRole
@@ -26,6 +26,7 @@ from pinky_control_center.teleop_service import TeleopService
 from pinky_control_center.safety_service import SafetyService
 from pinky_control_center.state_store import StateStore
 from pinky_control_center.storage import Storage, utc_now
+from pinky_control_center.mission_service import MissionService
 
 
 def default_database_path() -> Path:
@@ -46,6 +47,11 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     runtime_clock = monotonic_clock or time.monotonic
     teleop_service = TeleopService(runtime_clock)
     safety_service = SafetyService(runtime_clock)
+    mission_service = MissionService(storage, adapter, state_store, runtime_clock)
+    for operation in ("formation_pair", "formation_start", "formation_pause", "formation_unpair", "formation_rejoin"):
+        command_service.handlers[operation] = mission_service.execute_formation
+    for operation in ("mission_validate", "mission_start", "mission_resume", "mission_pause", "mission_cancel"):
+        command_service.handlers[operation] = mission_service.execute_mission
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -72,6 +78,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.state.command_dispatcher = command_service
     app.state.teleop_service = teleop_service
     app.state.safety_service = safety_service
+    app.state.mission_service = mission_service
     def refresh_stops() -> None:
         for robot in state_store.snapshot().robots:
             safety_service.observe(robot.robot_id, stop_latched=bool(robot.stop_latched), linear_mps=robot.linear_mps, angular_rps=robot.angular_rps, fresh=robot.pose_freshness.value == "FRESH")
@@ -86,6 +93,9 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
 
     async def runtime_tick() -> None:
         refresh_stops()
+        for event in getattr(adapter, "drain_events", lambda: [])():
+            mission_service.consume_adapter_event(event)
+        await mission_service.tick()
         for robot_id in teleop_service.tick():
             await protective_stop(robot_id)
         if storage.expire_security():
@@ -103,6 +113,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     app.state.lease_events = lease_events
     app.include_router(session.router)
     app.include_router(control.router)
+    app.include_router(missions.router)
     app.add_api_websocket_route("/ws/teleop", control.teleop)
     app.include_router(state.create_router(state_store))
     app.include_router(maps.create_router(map_service))

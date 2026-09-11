@@ -80,6 +80,38 @@ class Storage:
                 sql = resources.files("pinky_control_center").joinpath("migrations", "003_command_idempotency_window.sql").read_text(encoding="utf-8")
                 self.connection.executescript(sql)
                 self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(3, ?)", (_timestamp(self.clock()),))
+            if 4 not in applied:
+                sql = resources.files("pinky_control_center").joinpath("migrations", "004_missions.sql").read_text(encoding="utf-8")
+                self.connection.executescript(sql)
+                self.connection.execute("INSERT INTO schema_migrations(version, applied_at) VALUES(4, ?)", (_timestamp(self.clock()),))
+
+    def create_mission(self, user: UserInfo, payload: dict[str, object]) -> dict[str, object]:
+        mission_id, now = str(uuid4()), _timestamp(self.clock())
+        with self.connection:
+            self.connection.execute("INSERT INTO missions(id,user_id,payload_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?)", (mission_id, str(user.user_id), json.dumps(payload), payload["state"], now, now))
+        return {"mission_id": mission_id, **payload, "created_at": now, "updated_at": now}
+
+    def create_mission_idempotent(self, user: UserInfo, request_id: UUID, payload: dict[str, object]) -> dict[str, object]:
+        # The request claim and mission/result materialization share the same process lock.
+        # A second caller re-reads the first caller's durable result rather than creating a twin.
+        with self._command_lock:
+            command = self.create_command(user, request_id, "missions", {"operation": "mission_create", "payload": payload})
+            existing = command.get("result", {}).get("mission") if isinstance(command.get("result"), dict) else None
+            if existing:
+                return existing
+            mission = self.create_mission(user, payload)
+            self.set_command_result(str(command["command_id"]), {"mission": mission})
+            self.set_command_state(str(command["command_id"]), "SUCCEEDED")
+            return mission
+
+    def mission(self, mission_id: str, user: UserInfo) -> dict[str, object] | None:
+        row = self.connection.execute("SELECT id,payload_json,created_at,updated_at FROM missions WHERE id=? AND user_id=?", (mission_id, str(user.user_id))).fetchone()
+        return None if row is None else {"mission_id": row["id"], **json.loads(row["payload_json"]), "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+    def update_mission(self, mission_id: str, payload: dict[str, object]) -> None:
+        now = _timestamp(self.clock())
+        with self.connection:
+            self.connection.execute("UPDATE missions SET payload_json=?, state=?, updated_at=? WHERE id=?", (json.dumps(payload), payload["state"], now, mission_id))
 
     def create_command(self, user: UserInfo, request_id: UUID, target: str, payload: dict[str, object]) -> dict[str, object]:
         payload_text = json.dumps(payload, sort_keys=True, separators=(",", ":"))

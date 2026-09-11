@@ -18,6 +18,7 @@ class QueuedCommand:
     command_id: str
     operation: str
     target: str
+    parameters: dict[str, object] | None = None
 
 
 class CommandQueue:
@@ -51,13 +52,14 @@ class CommandDispatcher:
         self._task: asyncio.Task[None] | None = None
         self._queued_ids: set[str] = set()
         self._active_stops: dict[str, list[str]] = {}
+        self.handlers: dict[str, object] = {}
 
     def submit(self, user: UserInfo, request_id: UUID, target: str, operation: str, *, priority: bool = False, parameters: dict[str, object] | None = None) -> dict[str, object]:
         command = self.storage.create_command(user, request_id, target, {"operation": operation, "target": target, "parameters": parameters or {}})
         command_id = str(command["command_id"])
         if command_id not in self._queued_ids and command.get("state") == "ACCEPTED":
             try:
-                self.queue.submit(QueuedCommand(command_id, operation, target), priority=priority)
+                self.queue.submit(QueuedCommand(command_id, operation, target, parameters), priority=priority)
             except QueueFull:
                 self.storage.delete_command(command_id)
                 raise
@@ -114,12 +116,22 @@ class CommandDispatcher:
             return
         self._queued_ids.discard(item.command_id)
         self.storage.set_command_state(item.command_id, "RUNNING")
+        handler = self.handlers.get(item.operation)
+        if handler is not None:
+            try:
+                accepted, result = await handler(item.operation, item.parameters or {})
+                self.storage.set_command_result(item.command_id, result)
+                self.storage.set_command_state(item.command_id, "SUCCEEDED" if accepted else "FAILED")
+            except Exception as error:
+                self.storage.set_command_result(item.command_id, {"reason_code": "EXECUTION_FAILED"})
+                self.storage.set_command_state(item.command_id, "FAILED")
+            return
         targets = ["robot_1", "robot_2"] if item.target == "all" else [item.target]
         result_targets: list[dict[str, str]] = []
         rejected = False
         for robot_id in targets:
             try:
-                accepted = await self.adapter.execute(CommandRequest(command_id=UUID(item.command_id), robot_id=robot_id, operation=item.operation))
+                accepted = await self.adapter.execute(CommandRequest(command_id=UUID(item.command_id), robot_id=robot_id, operation=item.operation, parameters=item.parameters or {}))
                 if accepted.accepted:
                     result_targets.append({"robot_id": robot_id, "state": "ACKNOWLEDGED"})
                 else:

@@ -48,14 +48,18 @@ class MockRobotAdapter:
         if self._scenario is MockScenario.COMMAND_REJECTED:
             self._command_events.append(AdapterEvent(
                 kind="command", robot_id=command.robot_id, received_at=datetime.now(UTC),
-                payload={"command_id": str(command.command_id), "state": "REJECTED", "reason_code": "MOCK_COMMAND_REJECTED"},
+                payload={"command_id": str(command.command_id), "state": "REJECTED", "reason_code": "MOCK_COMMAND_REJECTED", "operation": command.operation, "parameters": command.parameters},
             ))
             return CommandAcceptance(accepted=False, reason_code="MOCK_COMMAND_REJECTED")
         self._command_events.append(AdapterEvent(
             kind="command", robot_id=command.robot_id, received_at=datetime.now(UTC),
-            payload={"command_id": str(command.command_id), "state": "SUCCEEDED", "reason_code": None},
+            payload={"command_id": str(command.command_id), "state": "SUCCEEDED", "reason_code": None, "operation": command.operation, "parameters": command.parameters},
         ))
         return CommandAcceptance(accepted=True)
+
+    def drain_events(self) -> list[AdapterEvent]:
+        events, self._command_events = self._command_events, []
+        return events
 
     def snapshot(self) -> StateSnapshot:
         now = datetime.now(UTC)
