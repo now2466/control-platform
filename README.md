@@ -66,10 +66,11 @@ T05 frontend 검증은 frontend Vitest 27개와 backend mock/runtime tests 38개
 
 ## 읽는 순서
 
-1. [요구사항 정의서](docs/01-requirements.md): 범위, 우선순위, 인수 기준, 담당 경계.
-2. [기능·인터페이스 명세서](docs/02-functional-spec.md): 화면, 상태 전이, API, ROS 계약, 저장 구조.
-3. [구현 계획](docs/03-implementation-plan.md): 파일 구조, 작업 순서, 검증, 실물 연동 게이트.
-4. [계약 보완](docs/04-contract-clarifications.md): API와 상태 계약의 보완 규칙.
+1. [사용자 가이드](docs/user-guide.md): 실행, 화면 구성, 편대·임무·정지·카메라 사용법.
+2. [요구사항 정의서](docs/01-requirements.md): 범위, 우선순위, 인수 기준, 담당 경계.
+3. [기능·인터페이스 명세서](docs/02-functional-spec.md): 화면, 상태 전이, API, ROS 계약, 저장 구조.
+4. [구현 계획](docs/03-implementation-plan.md): 파일 구조, 작업 순서, 검증, 실물 연동 게이트.
+5. [계약 보완](docs/04-contract-clarifications.md): API와 상태 계약의 보완 규칙.
 
 P0/P1/P2는 개발 순서이다. T11/R14 영상 기록·동기 재생은 사용자 결정으로 제외했으며, 나머지 범위의 모의 데이터 검증 완료와 실물 로봇 검증 완료를 별도로 보고한다.
 
