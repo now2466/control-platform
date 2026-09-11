@@ -91,6 +91,9 @@ def test_active_map_controls_mission_creation_and_persisted_speed_limits_manual_
         changed = client.put("/api/v1/settings", json=_payload(max_linear_mps=.1, max_angular_rps=.2), headers=headers)
         assert changed.status_code == 200
         lease = client.post("/api/v1/control-lease", json={"request_id": str(uuid4())}, headers=headers).json()["lease_id"]
+        pair = client.post("/api/v1/formation/actions", json={"request_id": str(uuid4()), "action": "pair", "master_id": "robot_1", "slave_id": "robot_2", "lease_id": lease}, headers=headers)
+        assert pair.status_code == 202
+        asyncio.run(app.state.command_dispatcher.process_next())
         mission = {"request_id": str(uuid4()), "name": "active map", "map_id": "mock_lab_b", "waypoints": [{"x": 1, "y": 1, "yaw": 0, "frame_id": "map"}], "repeat_count": 1, "lease_id": lease}
         assert client.post("/api/v1/missions", json=mission, headers=headers).status_code == 201
         stale = {**mission, "request_id": str(uuid4()), "map_id": "mock_lab"}
@@ -109,3 +112,46 @@ def test_settings_require_declared_single_worker(monkeypatch, tmp_path: Path) ->
         assert False, "multiple workers must be rejected while settings apply is process-local"
     except ValueError as error:
         assert "single worker" in str(error)
+
+
+def test_missions_require_ready_matching_formation_and_active_map_at_start(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False)
+    with TestClient(app) as client:
+        app.state.storage.create_or_reset_user("admin", "admin-password", UserRole.ADMIN)
+        headers = _login(client, "admin", "admin-password")
+        lease = client.post("/api/v1/control-lease", json={"request_id": str(uuid4())}, headers=headers).json()["lease_id"]
+        body = {"request_id": str(uuid4()), "name": "guarded", "map_id": "mock_lab", "waypoints": [{"x": 1, "y": 1, "yaw": 0, "frame_id": "map"}], "repeat_count": 1, "lease_id": lease}
+        assert client.post("/api/v1/missions", json=body, headers=headers).status_code == 409
+        paired = client.post("/api/v1/formation/actions", json={"request_id": str(uuid4()), "action": "pair", "master_id": "robot_1", "slave_id": "robot_2", "lease_id": lease}, headers=headers)
+        assert paired.status_code == 202
+        asyncio.run(app.state.command_dispatcher.process_next())
+        created = client.post("/api/v1/missions", json={**body, "request_id": str(uuid4())}, headers=headers).json()
+        validated = client.post(f"/api/v1/missions/{created['mission_id']}/actions", json={"request_id": str(uuid4()), "action": "validate", "lease_id": lease}, headers=headers)
+        assert validated.status_code == 202
+        asyncio.run(app.state.command_dispatcher.process_next())
+        changed = ActiveSettings(version=1, active_map_id="mock_lab_b", follow_distance_m=.8, follow_tolerance_m=.2, max_linear_mps=.15, max_angular_rps=.5, camera_quality="high")
+        assert app.state.storage.update_settings(1, changed) is not None
+        rejected = client.post(f"/api/v1/missions/{created['mission_id']}/actions", json={"request_id": str(uuid4()), "action": "start", "lease_id": lease}, headers=headers)
+        assert rejected.status_code == 409
+        assert rejected.json()["error"]["code"] == "MAP_NOT_ACTIVE"
+        app.state.storage.update_settings(2, ActiveSettings(version=2, active_map_id="mock_lab", follow_distance_m=.8, follow_tolerance_m=.2, max_linear_mps=.15, max_angular_rps=.5, camera_quality="high"))
+        stored = app.state.storage.mission(created["mission_id"], app.state.storage.authenticate("admin", "admin-password"))
+        assert stored is not None
+        stored["master_id"], stored["slave_id"] = "robot_2", "robot_1"
+        app.state.storage.update_mission(created["mission_id"], stored)
+        mismatch = client.post(f"/api/v1/missions/{created['mission_id']}/actions", json={"request_id": str(uuid4()), "action": "start", "lease_id": lease}, headers=headers)
+        assert mismatch.status_code == 409
+        assert mismatch.json()["error"]["code"] == "FORMATION_MISMATCH"
+
+
+def test_camera_quality_is_reapplied_after_restart(tmp_path: Path) -> None:
+    path = tmp_path / "control.db"
+    first = create_app(database_path=path, start_command_worker=False)
+    with TestClient(first) as client:
+        client.app.state.storage.create_or_reset_user("admin", "admin-password", UserRole.ADMIN)
+        headers = _login(client, "admin", "admin-password")
+        assert client.put("/api/v1/settings", json=_payload(camera_quality="high"), headers=headers).status_code == 200
+        assert client.app.state.adapter._settings["camera_quality"] == "high"
+    restarted = create_app(database_path=path, start_command_worker=False)
+    with TestClient(restarted):
+        assert restarted.state.adapter._settings["camera_quality"] == "high"

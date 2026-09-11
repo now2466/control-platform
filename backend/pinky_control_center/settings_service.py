@@ -49,6 +49,12 @@ class SettingsService:
             return False
         return True
 
+    async def apply_current(self) -> None:
+        """Apply the durable setting before any camera or command consumer starts."""
+        apply = getattr(self.adapter, "apply_settings", None)
+        if apply is None or not await apply(self.current().model_dump(mode="json", exclude={"version"})):
+            raise SettingsApplyFailed()
+
     async def update(self, requested: ActiveSettings) -> ActiveSettings:
         # Serialize compare/apply/store so a losing version cannot leave the mock
         # adapter with values that differ from the durable active configuration.

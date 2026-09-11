@@ -67,6 +67,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await adapter.connect()
+        await settings_service.apply_current()
         if start_command_worker:
             await command_service.start()
         watchdog_task = asyncio.create_task(watchdog()) if start_watchdog else None

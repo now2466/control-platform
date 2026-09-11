@@ -158,6 +158,8 @@ def test_mission_mutations_need_owned_lease_and_create_replays_same_request(tmp_
         h=headers(client); body={"request_id":str(uuid4()),"name":"one","map_id":"mock_lab","waypoints":[{"x":2,"y":2,"yaw":0,"frame_id":"map"}],"repeat_count":1}
         no_lease={key:value for key,value in h.items() if key != "x-control-lease-id"}
         assert client.post("/api/v1/missions",json=body,headers=no_lease).status_code==409
+        paired=client.post("/api/v1/formation/actions",json={"request_id":str(uuid4()),"action":"pair","master_id":"robot_1","slave_id":"robot_2"},headers=h)
+        assert paired.status_code==202; asyncio.run(app.state.command_dispatcher.process_next())
         first=client.post("/api/v1/missions",json=body,headers=h)
         same=client.post("/api/v1/missions",json=body,headers=h)
         assert first.status_code==same.status_code==201
@@ -244,6 +246,8 @@ def test_draft_cancel_completes_without_active_mission_tracking(tmp_path: Path):
     app=create_app(database_path=tmp_path/"control.db", start_command_worker=False)
     with TestClient(app) as client:
         h=headers(client)
+        paired=client.post("/api/v1/formation/actions",json={"request_id":str(uuid4()),"action":"pair","master_id":"robot_1","slave_id":"robot_2"},headers=h)
+        assert paired.status_code==202; asyncio.run(app.state.command_dispatcher.process_next())
         mission=client.post("/api/v1/missions",json={"request_id":str(uuid4()),"name":"draft","map_id":"mock_lab","waypoints":[{"x":2,"y":2,"yaw":0,"frame_id":"map"}],"repeat_count":1},headers=h).json()
         accepted=client.post(f"/api/v1/missions/{mission['mission_id']}/actions",json={"request_id":str(uuid4()),"action":"cancel"},headers=h)
         assert accepted.status_code==202; asyncio.run(app.state.command_dispatcher.process_next())

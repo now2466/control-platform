@@ -242,6 +242,12 @@ class MissionService:
         return True, {"targets": [{"robot_id": master, "state": "ACKNOWLEDGED"}, {"robot_id": slave, "state": "ACKNOWLEDGED"}]}
 
     def create(self, user: UserInfo, payload: dict[str, object]) -> dict[str, object]:
+        formation = self.formation()
+        if formation.state != FormationMode.READY:
+            raise HTTPException(409, detail="FORMATION_NOT_READY")
+        if not formation.master_id or not formation.slave_id:
+            raise HTTPException(409, detail="FORMATION_MISMATCH")
+        self.pair_allowed(formation.master_id, formation.slave_id)
         waypoints = payload.get("waypoints")
         if not isinstance(waypoints, list) or not 1 <= len(waypoints) <= 100:
             raise HTTPException(422, detail="INVALID_VALUE")
@@ -249,7 +255,7 @@ class MissionService:
             for waypoint in waypoints:
                 Pose.model_validate(waypoint)
         except Exception as error: raise HTTPException(422, detail="INVALID_VALUE") from error
-        data = {"name": payload.get("name"), "state": MissionState.DRAFT.value, "master_id": self.formation().master_id, "slave_id": self.formation().slave_id, "map_id": payload.get("map_id"), "waypoints": waypoints, "repeat_count": payload.get("repeat_count", 1), "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None, "version": 1}
+        data = {"name": payload.get("name"), "state": MissionState.DRAFT.value, "master_id": formation.master_id, "slave_id": formation.slave_id, "map_id": payload.get("map_id"), "waypoints": waypoints, "repeat_count": payload.get("repeat_count", 1), "waypoint_index": 0, "lap_index": 0, "progress_distance_m": None, "failure_code": None, "version": 1}
         if not isinstance(data["name"], str) or not isinstance(data["map_id"], str) or not isinstance(data["repeat_count"], int) or not 1 <= data["repeat_count"] <= 100: raise HTTPException(422, detail="INVALID_VALUE")
         if data["map_id"] != self.settings_provider().active_map_id:
             raise HTTPException(409, detail="MAP_NOT_ACTIVE")
@@ -295,7 +301,14 @@ class MissionService:
         state = mission["state"]
         valid = {"validate": {"DRAFT"}, "start": {"READY", "PAUSED"}, "pause": {"RUNNING"}, "resume": {"PAUSED"}, "cancel": {"DRAFT", "READY", "RUNNING", "PAUSED"}}
         if action not in valid or state not in valid[action]: raise HTTPException(409, detail="INVALID_STATE")
-        if action in {"start", "resume"} and self.formation().state not in {FormationMode.READY, FormationMode.PAUSED}: raise HTTPException(409, detail="INVALID_STATE")
+        if action in {"start", "resume"}:
+            formation = self.formation()
+            if formation.state not in {FormationMode.READY, FormationMode.PAUSED}:
+                raise HTTPException(409, detail="INVALID_STATE")
+            if mission["map_id"] != self.settings_provider().active_map_id:
+                raise HTTPException(409, detail="MAP_NOT_ACTIVE")
+            if mission["master_id"] != formation.master_id or mission["slave_id"] != formation.slave_id:
+                raise HTTPException(409, detail="FORMATION_MISMATCH")
         result = dispatcher.submit(user, request_id, mission_id, "mission_" + action, parameters={"mission_id": mission_id})
         # Claim a start synchronously: distinct concurrent requests cannot enqueue two goals.
         if action in {"start", "resume"} and result.get("state") == "ACCEPTED":

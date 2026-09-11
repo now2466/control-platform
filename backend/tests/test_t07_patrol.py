@@ -12,12 +12,16 @@ def auth(client):
     login=client.post("/api/v1/session",json={"username":"op","password":"operator-password"},headers={"origin":ORIGIN}); csrf=login.json()["csrf_token"]
     lease=client.post("/api/v1/control-lease",json={"request_id":str(uuid4())},headers={"origin":ORIGIN,"x-csrf-token":csrf}).json()["lease_id"]
     return {"origin":ORIGIN,"x-csrf-token":csrf,"x-control-lease-id":lease}
+def ready_pair(app, client, headers):
+    paired=client.post('/api/v1/formation/actions',json={"request_id":str(uuid4()),"action":"pair","master_id":"robot_1","slave_id":"robot_2"},headers=headers)
+    assert paired.status_code==202
+    asyncio.run(app.state.command_dispatcher.process_next())
 def payload(h): return {"request_id":str(uuid4()),"name":"route","map_id":"mock_lab","waypoints":[{"x":1+i,"y":2,"yaw":0,"frame_id":"map"} for i in range(3)],"repeat_count":2}
 
 def test_patch_ready_mission_versions_and_validates_waypoint_bounds(tmp_path:Path):
     app=create_app(database_path=tmp_path/'db',start_command_worker=False, start_watchdog=False)
     with TestClient(app) as c:
-        h=auth(c); made=c.post('/api/v1/missions',json=payload(h),headers=h).json()
+        h=auth(c); ready_pair(app,c,h); made=c.post('/api/v1/missions',json=payload(h),headers=h).json()
         edited=c.patch(f"/api/v1/missions/{made['mission_id']}",json={"request_id":str(uuid4()),"version":1,"name":"edited","repeat_count":2},headers=h)
         assert edited.status_code==200 and edited.json()['version']==2
         assert c.patch(f"/api/v1/missions/{made['mission_id']}",json={"request_id":str(uuid4()),"version":1,"name":"old"},headers=h).status_code==409
@@ -25,13 +29,13 @@ def test_patch_ready_mission_versions_and_validates_waypoint_bounds(tmp_path:Pat
 def test_create_rejects_malformed_second_waypoint(tmp_path:Path):
     app=create_app(database_path=tmp_path/'db',start_command_worker=False)
     with TestClient(app) as c:
-        h=auth(c); body=payload(h); body['waypoints'][1]={"x":2,"y":2,"yaw":0,"frame_id":""}
+        h=auth(c); ready_pair(app,c,h); body=payload(h); body['waypoints'][1]={"x":2,"y":2,"yaw":0,"frame_id":""}
         assert c.post('/api/v1/missions',json=body,headers=h).status_code==422
 
 def test_patch_request_id_replays_once_and_rejects_changed_payload(tmp_path:Path):
     app=create_app(database_path=tmp_path/'db',start_command_worker=False)
     with TestClient(app) as c:
-        h=auth(c); made=c.post('/api/v1/missions',json=payload(h),headers=h).json(); request_id=str(uuid4())
+        h=auth(c); ready_pair(app,c,h); made=c.post('/api/v1/missions',json=payload(h),headers=h).json(); request_id=str(uuid4())
         body={"request_id":request_id,"version":1,"name":"once"}; first=c.patch(f"/api/v1/missions/{made['mission_id']}",json=body,headers=h); replay=c.patch(f"/api/v1/missions/{made['mission_id']}",json=body,headers=h)
         assert first.json()['version']==replay.json()['version']==2
         changed=c.patch(f"/api/v1/missions/{made['mission_id']}",json={"request_id":request_id,"version":1,"name":"different"},headers=h)
@@ -69,7 +73,7 @@ def test_pause_preserves_index_and_resume_reissues_same_goal(tmp_path:Path):
         assert [x[1] for x in calls if x[0]=='navigate']==[1,1]
 
 def test_settle_timeout_never_sends_next_goal_and_restart_pauses_without_drive(tmp_path:Path):
-    now=[0.]; path=tmp_path/'db'; app=create_app(database_path=path,start_command_worker=False,monotonic_clock=lambda:now[0])
+    now=[0.]; path=tmp_path/'db'; app=create_app(database_path=path,start_command_worker=False,start_watchdog=False,monotonic_clock=lambda:now[0])
     with TestClient(app) as c:
         h=auth(c);c.post('/api/v1/formation/actions',json={"request_id":str(uuid4()),"action":"pair","master_id":"robot_1","slave_id":"robot_2"},headers=h);asyncio.run(app.state.command_dispatcher.process_next())
         mission=c.post('/api/v1/missions',json=payload(h),headers=h).json();mid=mission['mission_id'];c.post(f'/api/v1/missions/{mid}/actions',json={"request_id":str(uuid4()),"action":"validate"},headers=h);asyncio.run(app.state.command_dispatcher.process_next())
@@ -96,7 +100,7 @@ def test_second_waypoint_rejection_fails_without_third_goal(tmp_path:Path):
 def test_mission_list_is_owner_scoped_paginated_and_progress_persists(tmp_path:Path):
     app=create_app(database_path=tmp_path/'db',start_command_worker=False)
     with TestClient(app) as c:
-        h=auth(c)
+        h=auth(c); ready_pair(app,c,h)
         for i in range(3):
             body=payload(h);body['name']=f'r{i}';c.post('/api/v1/missions',json=body,headers=h)
         first=c.get('/api/v1/missions?limit=2').json(); second=c.get(f"/api/v1/missions?limit=2&cursor={first['next_cursor']}").json()
@@ -118,6 +122,8 @@ def test_navigation_rejection_protectively_stops_both(tmp_path:Path):
 
 def test_concurrent_patch_version_and_request_replay_apply_once(tmp_path:Path):
     app=create_app(database_path=tmp_path/'db',start_command_worker=False); user=app.state.storage.create_or_reset_user('op','operator-password',UserRole.OPERATOR)
+    from pinky_control_center.models import FormationMode, FormationState
+    app.state.state_store.formation_override=FormationState(state=FormationMode.READY,master_id='robot_1',slave_id='robot_2',target_distance_m=.8,distance_m=.8,gap_error_m=0.)
     created=app.state.mission_service.create(user,{"request_id":str(uuid4()),"name":"route","map_id":"mock_lab","waypoints":[{"x":1,"y":2,"yaw":0,"frame_id":"map"}],"repeat_count":1})
     barrier=Barrier(2); outcomes=[]
     def edit(name, request, version=1):

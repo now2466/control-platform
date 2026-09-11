@@ -5,7 +5,7 @@ type Robot = { robot_id: string; name: string; mode: string; pose?: { x: number;
 
 const initial: ActiveSettings = { version: 1, active_map_id: 'mock_lab', follow_distance_m: .8, follow_tolerance_m: .2, max_linear_mps: .15, max_angular_rps: .5, camera_quality: 'default' }
 
-export default function SettingsPage({ role, robots, selectedRobot, onError, onSaved }: { role: string; robots: Robot[]; selectedRobot: string; onError: (message: string) => void; onSaved: (value: ActiveSettings) => void }) {
+export default function SettingsPage({ role, robots, selectedRobot, onError, onSaved, onLoaded }: { role: string; robots: Robot[]; selectedRobot: string; onError: (message: string) => void; onSaved: (value: ActiveSettings) => void; onLoaded?: (value: ActiveSettings) => void }) {
   const [settings, setSettings] = useState<ActiveSettings>(initial)
   const [maps, setMaps] = useState<MapSummary[]>([])
   const [pose, setPose] = useState<Goal>({ x: 0, y: 0, yaw: 0, frame_id: 'map' })
@@ -17,7 +17,7 @@ export default function SettingsPage({ role, robots, selectedRobot, onError, onS
     let alive = true
     Promise.all([getSettings(), listMaps()]).then(([value, available]) => {
       if (!alive) return
-      setSettings(value); setMaps(available); setNotice('')
+      setSettings(value); setMaps(available); onLoaded?.(value); setNotice('')
     }).catch(error => alive && onError((error as Error).message))
     return () => { alive = false }
   }, [])

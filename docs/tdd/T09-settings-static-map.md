@@ -20,7 +20,9 @@ SLAM 지도 생성/저장/리셋, LED·lamp·LCD/감정 장치, 역할 교환·�
 - map 선택은 이동 중이거나 편대/임무가 활성인 경우 거절한다. initial pose도 별도의 정지 검증을 통과해야 한다.
 - `SettingsPage`는 활성 지도, 모든 제한값, 품질, 선택 로봇 pose 입력을 표시하고 ADMIN 외 사용자에게 변경을 비활성화한다.
 - 임무 생성은 현재 활성 static map만 받으며, pair/follow-start와 slave settle은 저장된 거리·허용 오차를 사용한다. manual WebSocket도 저장된 선/각속도를 초과하면 `SETTINGS_SPEED_LIMIT`으로 거절한다.
+- 임무 생성은 READY 편대의 검증된 master/slave pair가 있어야 한다. start/resume도 저장된 map_id와 pair가 현재 활성 지도·편대와 일치하는지 다시 검사하므로, map 변경 뒤 남은 draft/READY mission을 주행시킬 수 없다.
 - `mock_lab_b`는 별도 deterministic occupancy PNG를 제공한다. 두 map은 이름, ETag, 픽셀 fixture가 같지 않다.
+- camera quality는 SettingsPage가 읽은 활성값으로 모든 CameraTile을 초기화하고, 서버 lifespan에서 저장된 설정을 mock adapter에 다시 적용한다. 재시작 뒤에도 새 frame과 UI가 여는 camera socket이 같은 품질을 사용한다.
 
 ## 검증
 
