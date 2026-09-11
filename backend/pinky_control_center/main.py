@@ -15,9 +15,10 @@ from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pinky_control_center.adapters.mock import MockRobotAdapter
+from pinky_control_center.adapters.ros import RosbridgeAdapter
 from pinky_control_center.api import alerts, cameras, control, history, maps, missions, sensors, session, state, settings
 from pinky_control_center.auth import current_user, verify_mutation
-from pinky_control_center.config import load_mock_config
+from pinky_control_center.config import load_mock_config, load_ros_config
 from pinky_control_center.models import FormationMode, MockScenario, MockScenarioRequest, UserInfo, UserRole
 from pinky_control_center.map_service import MapService
 from pinky_control_center.camera_service import CameraService
@@ -43,9 +44,12 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
         raise ValueError("CONTROL_PLATFORM_WORKERS must declare a single worker") from error
     if worker_count != 1:
         raise ValueError("settings application requires a single worker")
-    if mode != "mock":
-        raise ValueError("ROS mode is not available in T01; start with --mode mock")
-    adapter = MockRobotAdapter(config=load_mock_config(config_path))
+    if mode == "mock":
+        adapter = MockRobotAdapter(config=load_mock_config(config_path))
+    elif mode == "ros":
+        adapter = RosbridgeAdapter(load_ros_config(config_path))
+    else:
+        raise ValueError("mode must be mock or ros")
     lease_events: list[str] = []
     storage = Storage(database_path or default_database_path(), clock=storage_clock or utc_now, lease_end_hook=lease_events.append)
     state_store = StateStore(adapter.snapshot)
@@ -67,7 +71,11 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await adapter.connect()
-        await settings_service.apply_current()
+        # Existing dashboard settings are mock-only until the robot-side
+        # parameter/control contract is supplied.  ROS starts in observation
+        # mode instead of claiming that those values reached hardware.
+        if mode == "mock":
+            await settings_service.apply_current()
         if start_command_worker:
             await command_service.start()
         watchdog_task = asyncio.create_task(watchdog()) if start_watchdog else None
@@ -180,10 +188,14 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
 
     @app.get("/api/v1/mock/scenario", response_model=MockScenarioRequest)
     async def get_scenario(_user: UserInfo = Depends(current_user)) -> MockScenarioRequest:
+        if mode != "mock":
+            raise HTTPException(status_code=404, detail="NOT_FOUND")
         return MockScenarioRequest(scenario=adapter.scenario)
 
     @app.post("/api/v1/mock/scenario", response_model=MockScenarioRequest)
     async def set_scenario(payload: MockScenarioRequest, request: Request, user: UserInfo = Depends(current_user)) -> MockScenarioRequest:
+        if mode != "mock":
+            raise HTTPException(status_code=404, detail="NOT_FOUND")
         if user.role not in {UserRole.OPERATOR, UserRole.ADMIN}:
             raise HTTPException(status_code=403, detail="FORBIDDEN")
         verify_mutation(request, user)
@@ -194,24 +206,22 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
 
 
 def cli() -> None:
-    parser = argparse.ArgumentParser(description="Run the Pinky Pro mock control API")
+    parser = argparse.ArgumentParser(description="Run the Pinky Pro control API")
     parser.add_argument("--mode", choices=("mock", "ros"), default="mock")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8081)
-    parser.add_argument("--config", type=Path, default=None, help="path to mock robot mapping YAML")
+    parser.add_argument("--config", type=Path, default=None, help="path to robot mapping YAML for the selected mode")
     parser.add_argument("--database", type=Path, default=default_database_path())
     parser.add_argument("--reset-password", metavar="USERNAME")
     parser.add_argument("--password", help="password for --reset-password; never persisted in plaintext")
     parser.add_argument("--role", choices=[role.value for role in UserRole], default=UserRole.ADMIN.value)
     args = parser.parse_args()
-    if args.mode != "mock":
-        parser.error("ROS mode is planned for T12 and cannot run in T01")
     if args.reset_password:
         if not args.password:
             parser.error("--password is required with --reset-password")
         Storage(args.database).create_or_reset_user(args.reset_password, args.password, UserRole(args.role))
         return
-    uvicorn.run(create_app("mock", args.config, args.database), host=args.host, port=args.port, workers=1)
+    uvicorn.run(create_app(args.mode, args.config, args.database), host=args.host, port=args.port, workers=1)
 
 
 if __name__ == "__main__":
