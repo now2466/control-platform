@@ -28,7 +28,7 @@ from PIL import Image
 from pinky_control_center.config import RosbridgeConfig, RosbridgeRobotConfig
 from pinky_control_center.models import (
     AdapterEvent, CameraFrame, CommandAcceptance, CommandRequest, Connection,
-    FormationMode, FormationState, Freshness, Pose, RobotMode, RobotState,
+    FormationMode, FormationState, Freshness, MapPoint, Pose, RobotMode, RobotState,
     SensorState, SensorStatus, StateSnapshot,
 )
 
@@ -227,6 +227,8 @@ class RosbridgeAdapter:
             "pose_freshness": Freshness.UNKNOWN, "battery_freshness": Freshness.UNKNOWN,
             "pose": None, "linear_mps": None, "angular_rps": None,
             "battery_percent": None, "voltage_v": None,
+            "mode": RobotMode.UNKNOWN, "stop_latched": None, "capabilities": [],
+            "trail": [], "path": [], "goal": None,
             "tf_valid": False, "tf_reason_code": "ROSBRIDGE_OFFLINE",
             "sensors": [SensorStatus(name="camera", state=SensorState.STALE)],
         })
@@ -336,7 +338,12 @@ class RosbridgeAdapter:
             if frame:
                 self._frames[robot_id] = frame
         elif robot.topics.path and topic == robot.topics.path:
-            await self._emit("path", robot_id, self._path_payload(robot_id, message), now)
+            payload = self._path_payload(robot_id, message)
+            self._states[robot_id] = self._states[robot_id].model_copy(update={
+                "connection": Connection.ONLINE, "received_at": now,
+                "path": [MapPoint.model_validate(point) for point in payload["points"]],
+            })
+            await self._emit("path", robot_id, payload, now)
 
     def _update_odom(self, robot_id: RobotId, message: dict[str, object], now: datetime) -> None:
         pose_part = _nested_dict(message, "pose", "pose")
@@ -441,7 +448,12 @@ class RosbridgeAdapter:
         )
 
     def frame(self, robot_id: str) -> CameraFrame | None:
-        return self._frames.get(robot_id) if robot_id in self._by_id else None
+        if robot_id not in self._by_id:
+            return None
+        if _freshness(self._camera_received_at[robot_id], self._clock(), _CAMERA_STALE_SECONDS) is not Freshness.FRESH:
+            self._frames.pop(robot_id, None)
+            return None
+        return self._frames.get(robot_id)
 
     def sensor_layers(self, robot_id: str) -> dict[str, object]:
         """Do not turn an unimplemented ROS overlay into an API 500."""

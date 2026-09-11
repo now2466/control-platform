@@ -185,6 +185,7 @@ def test_disconnect_and_reconnect_do_not_revive_old_telemetry() -> None:
             "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
         })
         await adapter.handle_publish("robot_1", "/robot_1/battery/percent", {"data": 86.0})
+        await adapter.handle_publish("robot_1", "/robot_1/control/status", {"mode": "MANUAL", "stop_latched": True, "capabilities": ["navigate"]})
         adapter._mark_disconnected("robot_1")
         now[0] += timedelta(milliseconds=100)
         adapter._mark_connected("robot_1")
@@ -192,6 +193,7 @@ def test_disconnect_and_reconnect_do_not_revive_old_telemetry() -> None:
         assert robot.pose is None
         assert robot.pose_freshness is Freshness.UNKNOWN
         assert robot.battery_percent is None and robot.battery_freshness is Freshness.UNKNOWN
+        assert robot.mode.value == "UNKNOWN" and robot.stop_latched is None and robot.capabilities == []
 
     asyncio.run(exercise())
 
@@ -210,6 +212,23 @@ def test_camera_sensor_stales_while_odom_continues() -> None:
         })
         camera = next(sensor for sensor in adapter.snapshot().robots[0].sensors if sensor.name == "camera")
         assert camera.state.value == "STALE"
+        assert adapter.frame("robot_1") is None
+
+    asyncio.run(exercise())
+
+
+def test_path_publish_updates_bounded_robot_snapshot_and_emits_layer_event() -> None:
+    async def exercise() -> None:
+        adapter = RosbridgeAdapter(load_ros_config())
+        await adapter.handle_publish("robot_1", "/robot_1/plan", {
+            "header": {"frame_id": "map"},
+            "poses": [{"pose": {"position": {"x": float(index), "y": 2.0}}} for index in range(205)],
+        })
+        robot = adapter.snapshot().robots[0]
+        assert len(robot.path) == 200
+        assert robot.path[0].x == 0.0 and robot.path[-1].x == 199.0
+        event = adapter.drain_events()[-1]
+        assert event.kind == "path" and len(event.payload["points"]) == 200
 
     asyncio.run(exercise())
 

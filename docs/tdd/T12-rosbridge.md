@@ -11,6 +11,7 @@
 - endpoint가 없어도 ROS 모드는 관찰 모드로 시작해 OFFLINE/STALE 상태를 표시하며, mock 설정을 하드웨어에 적용했다고 주장하지 않는다.
 - fragmented camera publish, cross-robot service response, stale pose 뒤 battery update, sensor overlay 미구현을 regression test로 고정했다.
 - disconnect/reconnect 뒤 old telemetry 격리, odom이 계속 와도 2초 뒤 camera STALE 전이, fragment ID 상한, event stream close, TLS/token environment reference를 추가로 고정했다.
+- camera가 STALE이면 cached JPEG도 전달하지 않는 것, disconnect가 mode/stop latch/capability/path 같은 live control state를 비우는 것, ROS Path가 200 point 이하 snapshot과 layer event에 함께 반영되는 것을 고정했다.
 
 ## GREEN
 
@@ -26,4 +27,4 @@
 cd backend && .venv/bin/python -m pytest tests/test_rosbridge_adapter.py tests/test_contracts.py tests/test_cameras.py tests/test_state.py -q
 ```
 
-결과: 26 passed (2026-09-11).
+결과: 27 passed (2026-09-11).
