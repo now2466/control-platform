@@ -28,6 +28,7 @@ def test_map_metadata_png_etag_and_authentication(tmp_path: Path) -> None:
         listing = client.get("/api/v1/maps")
         assert listing.status_code == 200
         assert listing.json()["items"] == [
+            {"map_id": "map_260905", "name": "260905 실습 트랙", "version": "1"},
             {"map_id": "mock_lab", "name": "Mock Lab", "version": "1"},
             {"map_id": "mock_lab_b", "name": "Mock Lab B (alternate occupancy)", "version": "1"},
         ]
@@ -52,6 +53,21 @@ def test_map_metadata_png_etag_and_authentication(tmp_path: Path) -> None:
         cached = client.get("/api/v1/maps/mock_lab/data", headers={"if-none-match": etag})
         assert cached.status_code == 304
         assert client.get("/api/v1/maps/missing").status_code == 404
+
+
+def test_world_map_has_world_dimensions_and_occupancy_walls(tmp_path: Path) -> None:
+    with authenticated_client(tmp_path) as client:
+        metadata = client.get("/api/v1/maps/map_260905").json()
+        assert metadata["frame_id"] == "map"
+        assert metadata["resolution"] == 0.005
+        assert metadata["width"] == 542
+        assert metadata["height"] == 252
+        assert metadata["origin"] == {"x": -1.355, "y": -0.63, "yaw": 0.0}
+        image = Image.open(BytesIO(client.get("/api/v1/maps/map_260905/data").content)).convert("L")
+        assert image.size == (542, 252)
+        assert image.getpixel((0, 126)) == 0
+        assert image.getpixel((271, 0)) == 0
+        assert image.getpixel((271, 126)) == 254
 
 
 def test_map_api_rejects_unauthenticated_requests(tmp_path: Path) -> None:

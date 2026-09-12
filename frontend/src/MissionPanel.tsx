@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import { createMission, getMission, listMissions, missionAction, updateMission, waitForCommand } from './api'
 import type { Goal, Mission } from './api'
 
-type Props = { lease: string | null; mapId?: string | null; formation?: { state?: string }; goal: Goal | null; onError: (message: string) => void }
+type Props = { lease: string | null; mapId?: string | null; formation?: { state?: string }; goal: Goal | null; resetVersion?: number; onError: (message: string) => void }
 const editableStates = new Set(['DRAFT', 'READY'])
 
-export default function MissionPanel({ lease, mapId, formation, goal, onError }: Props) {
+export default function MissionPanel({ lease, mapId, formation, goal, resetVersion, onError }: Props) {
   const [mission, setMission] = useState<Mission | null>(null)
   const [points, setPoints] = useState<Goal[]>(goal ? [goal] : [])
   const [name, setName] = useState('단일 목표 임무')
@@ -26,6 +26,9 @@ export default function MissionPanel({ lease, mapId, formation, goal, onError }:
     if (!goal) return
     setPoints(current => current.length >= 100 || current.some(p => p.x === goal.x && p.y === goal.y && p.yaw === goal.yaw) ? current : [...current, goal])
   }, [goal?.x, goal?.y, goal?.yaw, goal?.frame_id])
+  useEffect(() => {
+    if (resetVersion !== undefined && resetVersion > 0 && !mission) setPoints([])
+  }, [resetVersion, mission])
 
   const runAction = async (action: 'validate' | 'start' | 'pause' | 'resume' | 'cancel') => {
     if (!mission || !lease || busy) return
