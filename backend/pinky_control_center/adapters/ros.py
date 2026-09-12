@@ -629,7 +629,10 @@ class RosbridgeAdapter:
         except (KeyError, TypeError, ValueError):
             return CommandAcceptance(accepted=False, reason_code="INVALID_VALUE")
         message = {
-            "header": {"frame_id": pose.frame_id},
+            # A zero timestamp asks TF to use the latest available transform.
+            # This avoids rejecting an initial pose when the robot and control
+            # center clocks differ slightly or AMCL starts during publication.
+            "header": {"stamp": {"sec": 0, "nanosec": 0}, "frame_id": pose.frame_id},
             "pose": {
                 "pose": {
                     "position": {"x": pose.x, "y": pose.y, "z": 0.0},

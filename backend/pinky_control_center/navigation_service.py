@@ -87,7 +87,9 @@ class NavigationService:
         robot = next((item for item in snapshot.robots if item.robot_id == robot_id), None)
         if robot is None:
             raise NavigationConflict("ROBOT_NOT_FOUND")
-        if robot.connection is not Connection.ONLINE or robot.pose is None or robot.pose_freshness.value != "FRESH":
+        # Localization reset is the recovery path for a missing/stale map pose.
+        # Requiring that pose to already be fresh makes AMCL recovery impossible.
+        if robot.connection is not Connection.ONLINE:
             raise NavigationConflict("ROBOT_NOT_READY")
         if robot.mode not in {RobotMode.IDLE, RobotMode.STOPPED}:
             raise NavigationConflict("ROBOT_NOT_STOPPED")

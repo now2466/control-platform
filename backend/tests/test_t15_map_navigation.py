@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from pinky_control_center.main import create_app
-from pinky_control_center.models import UserRole
+from pinky_control_center.models import Freshness, UserRole
 
 
 ORIGIN = "http://localhost:5173"
@@ -97,3 +97,30 @@ def test_map_navigation_rejects_occupied_cells_and_localization_reset_keeps_map(
         asyncio.run(app.state.command_dispatcher.process_next())
         assert app.state.adapter._initial_poses["robot_1"].model_dump(mode="json") == _pose(1.0, 0.6, -0.2)
         assert client.get("/api/v1/state").json()["map_id"] == "mock_lab"
+
+
+def test_localization_reset_is_available_when_current_map_pose_is_stale(tmp_path: Path) -> None:
+    app = create_app(database_path=tmp_path / "control.db", start_command_worker=False, start_watchdog=False)
+    source = app.state.state_store.snapshot_source()
+    robots = [
+        robot.model_copy(update={"pose": None, "pose_freshness": Freshness.UNKNOWN, "tf_valid": False})
+        if robot.robot_id == "robot_1" else robot
+        for robot in source.robots
+    ]
+    app.state.state_store.snapshot_source = lambda: source.model_copy(update={"robots": robots})
+
+    with TestClient(app) as client:
+        headers = _operator_headers(client)
+        lease = _lease(client, headers)
+        reset = client.post(
+            "/api/v1/robots/robot_1/localization-reset",
+            json={
+                "request_id": str(uuid4()),
+                "lease_id": lease,
+                "map_id": "mock_lab",
+                "pose": _pose(1.0, 0.6),
+            },
+            headers=headers,
+        )
+
+        assert reset.status_code == 202

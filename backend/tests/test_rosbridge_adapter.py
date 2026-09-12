@@ -155,6 +155,7 @@ def test_rosbridge_publishes_initial_pose_and_manual_velocity_to_mediator_topics
         sent = sockets["ws://robot-1.local:9090"].sent
         initial_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/initialpose")
         assert initial_message["type"] == "geometry_msgs/msg/PoseWithCovarianceStamped"
+        assert initial_message["msg"]["header"]["stamp"] == {"sec": 0, "nanosec": 0}
         assert initial_message["msg"]["pose"]["pose"]["position"]["x"] == 1.0
         velocity_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/control/manual_velocity")
         assert velocity_message["type"] == "geometry_msgs/msg/TwistStamped"

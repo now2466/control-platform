@@ -65,3 +65,11 @@ test('navigation stays gated until a destination is selected and dispatches the 
   fireEvent.click(screen.getByRole('button', { name: '시작점에서 도착점으로 이동' }))
   expect(onNavigate).toHaveBeenCalledOnce()
 })
+
+test('shows the exact localization blocker instead of a generic disabled button', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ map_id: 'mock_lab', name: 'Mock Lab', frame_id: 'map', resolution: .1, width: 20, height: 20, origin: { x: 0, y: 0, yaw: 0 }, version: '1', data_url: '/api/v1/maps/mock_lab/data' }), { status: 200 }))
+  render(<MapPanel robots={[robot]} selected="robot_1" mapId="mock_lab" onSelect={() => {}} initialPose={{ x: 1, y: 1, yaw: 0, frame_id: 'map' }} localizationBlockers={['제어권이 없습니다.']} navigationBlockers={['AMCL map TF가 아직 유효하지 않습니다.']} />)
+  await screen.findByText('위치 재설정 불가: 제어권이 없습니다.')
+  expect(screen.getByText(/이동 불가: AMCL map TF가 아직 유효하지 않습니다./)).toBeTruthy()
+  expect(screen.getByRole('button', { name: '위치 재설정(AMCL)' })).toHaveAttribute('title', '제어권이 없습니다.')
+})

@@ -55,8 +55,26 @@ export default function App() {
   const selected = state?.robots.find(robot => robot.robot_id === selectedRobot)
   const formationSafe = state?.formation?.state === 'UNPAIRED' || state?.formation?.state === 'STOPPED'
   const still = selected?.linear_mps != null && Math.abs(selected.linear_mps) <= 0.001 && selected.angular_rps != null && Math.abs(selected.angular_rps) <= 0.001
-  const localizationReady = Boolean(lease && state?.map_id && initialPose && selected?.connection === 'ONLINE' && selected.pose_freshness === 'FRESH' && (selected.mode === 'IDLE' || selected.mode === 'STOPPED') && still && formationSafe && state?.active_mission == null)
-  const navigationReady = Boolean(localizationReady && selected?.tf_valid && selected?.mode === 'IDLE' && selected.stop_latched === false && selected.capabilities?.includes('navigate'))
+  const localizationBlockers = [
+    !lease && '제어권이 없습니다.',
+    !state?.map_id && '활성 지도가 없습니다.',
+    !initialPose && '시작점을 지정하지 않았습니다.',
+    selected?.connection !== 'ONLINE' && '선택 로봇이 ONLINE이 아닙니다.',
+    selected?.mode !== 'IDLE' && selected?.mode !== 'STOPPED' && '선택 로봇이 정지 상태가 아닙니다.',
+    !still && '선택 로봇의 속도가 0이 아닙니다.',
+    !formationSafe && '편대를 먼저 정지하거나 해제해야 합니다.',
+    state?.active_mission != null && '활성 임무를 먼저 종료해야 합니다.',
+  ].filter((reason): reason is string => Boolean(reason))
+  const localizationReady = localizationBlockers.length === 0
+  const navigationBlockers = [
+    ...localizationBlockers,
+    selected?.pose_freshness !== 'FRESH' && '로봇 위치 데이터가 아직 신선하지 않습니다.',
+    !selected?.tf_valid && 'AMCL map TF가 아직 유효하지 않습니다.',
+    selected?.mode !== 'IDLE' && '선택 로봇이 IDLE 상태가 아닙니다.',
+    selected?.stop_latched !== false && '선택 로봇의 정지 래치를 해제해야 합니다.',
+    !selected?.capabilities?.includes('navigate') && '로봇에서 navigate 기능이 준비되지 않았습니다.',
+  ].filter((reason): reason is string => Boolean(reason))
+  const navigationReady = navigationBlockers.length === 0
   const runNavigation = async () => {
     if (!lease || !state?.map_id || !initialPose || !goal) return
     setError(''); setNavigationStatus('이동 요청 중…'); setNavigationBusy(true)
@@ -84,7 +102,7 @@ export default function App() {
     <div className="session-status"><span className="pill online">권한 {user.role}</span><span className="pill">{socketStatus}</span>{lease ? <><span className="pill online">제어권 활성</span><button onClick={() => releaseLease(lease.lease_id).finally(() => setLease(null))}>제어권 반납</button></> : <button onClick={() => acquireLease().then(setLease).catch(e => setLeaseError(e.message))}>제어권 획득</button>}</div>
     {leaseError && <div className="error">{leaseError}</div>}
     {error && <div className="error">{dashboardErrorMessage(error)}</div>}
-    <MapPanel robots={state?.robots ?? []} selected={selectedRobot} mapId={state?.map_id} onSelect={setSelectedRobot} onGoalChange={setGoal} initialPose={initialPose} onInitialPoseChange={setInitialPose} onResetSelections={() => { setMapResetVersion(value => value + 1); setNavigationStatus('') }} onNavigate={runNavigation} navigationReady={navigationReady} navigationBusy={navigationBusy} onResetLocalization={runLocalizationReset} localizationReady={localizationReady} localizationBusy={localizationBusy} navigationStatus={navigationStatus} />
+    <MapPanel robots={state?.robots ?? []} selected={selectedRobot} mapId={state?.map_id} onSelect={setSelectedRobot} onGoalChange={setGoal} initialPose={initialPose} onInitialPoseChange={setInitialPose} onResetSelections={() => { setMapResetVersion(value => value + 1); setNavigationStatus('') }} onNavigate={runNavigation} navigationReady={navigationReady} navigationBusy={navigationBusy} navigationBlockers={navigationBlockers} onResetLocalization={runLocalizationReset} localizationReady={localizationReady} localizationBusy={localizationBusy} localizationBlockers={localizationBlockers} navigationStatus={navigationStatus} />
     <SettingsPage role={user.role} robots={state?.robots ?? []} selectedRobot={selectedRobot} initialPose={initialPose} poseResetVersion={mapResetVersion} onError={setError} onLoaded={value => setCameraQuality(value.camera_quality)} onSaved={value => { setGoal(null); setCameraQuality(value.camera_quality); setState(current => current ? { ...current, map_id: value.active_map_id } : current) }} />
     <AlertList alerts={state?.active_alerts ?? []} onError={setError} />
     <HistoryPanel robots={state?.robots ?? []} onError={setError} />

@@ -127,7 +127,7 @@ type Command = {
 
 1. 선택 로봇의 제어권을 획득하고 로봇이 ONLINE/FRESH이며 정지한 상태인지 확인한다.
 2. 지도에서 `시작점 설정`으로 실제 로봇을 둔 자유 셀과 방향을 지정한다.
-3. 로봇을 들어 옮겼거나 위치가 의심되면 `위치 재설정(AMCL)`을 눌러 `/initialpose`만 발행한다. 이 단계는 주행을 시작하지 않는다.
+3. 로봇을 들어 옮겼거나 위치가 의심되면 `위치 재설정(AMCL)`을 눌러 `/initialpose`만 발행한다. 이 복구 동작은 기존 map pose/TF의 FRESH 여부를 요구하지 않으며, 로봇 연결·정지·속도 0·편대/임무 안전 조건은 유지한다. 이 단계는 주행을 시작하지 않는다.
 4. 정지 래치가 걸려 있으면 운영자가 `정지 해제`를 명시적으로 수행한다. 정지 해제는 이전 목표를 재개하지 않는다.
 5. `도착점 설정`으로 자유 셀과 방향을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
 
@@ -137,7 +137,7 @@ type Command = {
 
 실물 Pinky의 목표 도달 판정은 지도 클릭 목표와 실제 정지 위치 사이의 평면 거리가 0.08m 이내이고 방향 오차가 0.17rad(약 10도) 이내일 때 성공으로 본다. 이는 0.25m 기본 허용오차로 인해 목표 약 0.22m 전에 성공 처리된 robot_2 현장 결과를 반영한 값이다. 최종 위치 오차는 현장 시험에서 기록하며, 허용오차를 줄인 뒤 진동·시간 초과가 발생하면 제어기와 감속 설정을 함께 재조정한다.
 
-AMCL이 `/initialpose`를 받은 뒤 `map→odom→base_footprint` TF를 발행하기까지는 수 초가 걸릴 수 있다. 정지 해제는 이 TF를 대신 만들지 않는다. robot_2 Nav2 session은 고정된 2초 타이머로 navigation lifecycle을 활성화하지 않고, 해당 TF가 확인될 때까지 lifecycle startup을 대기·재시도한다. TF가 확인되기 전에는 지도 주행 버튼을 비활성화하고, TF가 사라지거나 startup이 실패해도 goal을 전송하지 않는다.
+AMCL이 `/initialpose`를 받은 뒤 `map→odom→base_footprint` TF를 발행하기까지는 수 초가 걸릴 수 있다. 관제는 initial pose의 stamp를 0으로 보내 최신 TF를 사용하게 한다. 정지 해제는 이 TF를 대신 만들지 않는다. robot_2 Nav2 session은 고정된 2초 타이머로 navigation lifecycle을 활성화하지 않고, 해당 TF가 확인될 때까지 lifecycle startup을 대기·재시도한다. TF가 확인되기 전에는 지도 주행 버튼을 비활성화하고, TF가 사라지거나 startup이 실패해도 goal을 전송하지 않는다. 비활성 버튼 아래에는 제어권·연결·정지·TF 등 충족되지 않은 조건을 구체적으로 표시한다.
 
 Nav2 session은 navigation을 시작하기 전에 hardware bringup의 `/start_motor` 서비스를 호출해 SLLidar 스캔을 시작한다. `/scan`이 발행되지 않으면 AMCL과 map TF가 준비되지 않으므로 session을 명확한 오류로 종료하며, 라이다 publisher가 토픽에 등록된 것만으로 준비 완료로 간주하지 않는다.
 
@@ -154,7 +154,7 @@ Nav2 session은 navigation을 시작하기 전에 hardware bringup의 `/start_mo
 | PATCH/DELETE `/control-lease/{id}` | request_id | 갱신/반납; 소유자만 |
 | GET `/robots` | 없음 | 로봇 설정·capabilities 목록 |
 | POST `/robots/{id}/initial-pose` | request_id,pose | 정지·편대 해제·유효한 지도 TF 상태에서 command |
-| POST `/robots/{id}/localization-reset` | request_id,lease_id,map_id,pose | 선택 로봇이 정지한 상태에서 `/initialpose`만 발행. 정적 지도 유지, AMCL 추정 위치만 갱신 |
+| POST `/robots/{id}/localization-reset` | request_id,lease_id,map_id,pose | 선택 로봇이 연결되고 정지한 상태에서 `/initialpose`만 발행. 기존 pose/TF가 stale이어도 복구 가능. 정적 지도 유지, AMCL 추정 위치만 갱신 |
 | POST `/robots/{id}/navigate` | request_id,lease_id,map_id,start_pose,goal | 자유 셀·상태·capability 검증 후 start pose → AUTO → Nav2 `NavigateToPose` 요청 |
 | POST `/missions` | request_id,name,map_id,waypoints,repeat_count | DRAFT mission |
 | GET `/missions` | cursor,limit(최대100),state,from,to | items,next_cursor |
@@ -211,7 +211,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 | 신규 출력 | `{ns}/control/manual_velocity` | TwistStamped, 10Hz. 최종 cmd_vel에 직접 발행 금지 |
 | 신규 출력 | `{ns}/control/heartbeat` | std_msgs/UInt64, 10Hz 증가 counter; 수신 간격으로 watchdog 판단 |
 
-현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API와 지도 주행은 설정한 initial pose 토픽(실물 Pinky는 `/initialpose`)에 `PoseWithCovarianceStamped`를 발행한다. 지도 주행 실행기는 start pose를 먼저 발행하고 `AUTO` 모드와 `navigate` ControlCommand를 순서대로 요청한다. 실물 robot_2의 watchdog는 이 명령을 `/navigate_to_pose` action으로 연결하며 Nav2 출력은 `/control/nav_velocity`로 받고 최종 `/cmd_vel`을 단독 발행한다. 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 설정한 중재 토픽(실물 Pinky는 `/control/manual_velocity`)에 `TwistStamped`를 발행한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·AMCL 초기화·Nav2 action·안전 중재기는 현장 gate에서 별도 확인한다.
+현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API와 지도 주행은 설정한 initial pose 토픽(실물 Pinky는 `/initialpose`)에 stamp 0의 `PoseWithCovarianceStamped`를 발행해 최신 TF를 사용한다. 지도 주행 실행기는 start pose를 먼저 발행하고 `AUTO` 모드와 `navigate` ControlCommand를 순서대로 요청한다. 실물 robot_2의 watchdog는 이 명령을 `/navigate_to_pose` action으로 연결하며 Nav2 출력은 `/control/nav_velocity`로 받고 최종 `/cmd_vel`을 단독 발행한다. 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 설정한 중재 토픽(실물 Pinky는 `/control/manual_velocity`)에 `TwistStamped`를 발행한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·AMCL 초기화·Nav2 action·안전 중재기는 현장 gate에서 별도 확인한다.
 
 신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
 
