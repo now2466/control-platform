@@ -23,6 +23,7 @@ SLAM 지도 생성/저장/리셋은 정적 `map_260905` 운용 범위에 포함�
 - 임무 생성은 READY 편대의 검증된 master/slave pair가 있어야 한다. start/resume도 저장된 map_id와 pair가 현재 활성 지도·편대와 일치하는지 다시 검사하므로, map 변경 뒤 남은 draft/READY mission을 주행시킬 수 없다.
 - `mock_lab_b`는 별도 deterministic occupancy PNG를 제공한다. 두 map은 이름, ETag, 픽셀 fixture가 같지 않다.
 - camera quality는 SettingsPage가 읽은 활성값으로 모든 CameraTile을 초기화하고, 서버 lifespan에서 저장된 설정을 mock adapter에 다시 적용한다. 재시작 뒤에도 새 frame과 UI가 여는 camera socket이 같은 품질을 사용한다.
+- 지도 주행 시작점은 지도 클릭 외에도 선택 로봇의 최신 FRESH map pose를 정확히 복사할 수 있다. `현재 위치를 시작점으로` 버튼 또는 시작점 설정 모드의 선택 로봇 마커 클릭은 마커만 갱신하며, AMCL `/initialpose` 발행은 운영자가 `위치 재설정(AMCL)`을 누를 때까지 수행하지 않는다.
 
 ## 검증
 

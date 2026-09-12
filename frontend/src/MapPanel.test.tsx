@@ -51,6 +51,27 @@ test('map selection buttons assign a start pose and destination, and reset clear
   expect(onResetSelections).toHaveBeenCalledOnce()
 })
 
+test('uses the selected robot exact map pose as the start marker', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ map_id: 'mock_lab', name: 'Mock Lab', frame_id: 'map', resolution: .1, width: 20, height: 20, origin: { x: 0, y: 0, yaw: 0 }, version: '1', data_url: '/api/v1/maps/mock_lab/data' }), { status: 200 }))
+  const onInitialPoseChange = vi.fn()
+  const current = { ...robot, pose: { x: 1.234, y: .876, yaw: -.42, frame_id: 'map' }, pose_freshness: 'FRESH', tf_valid: true }
+  render(<MapPanel robots={[current]} selected="robot_1" mapId="mock_lab" onSelect={() => {}} onInitialPoseChange={onInitialPoseChange} />)
+  await screen.findByText(/목표 미리보기/)
+  fireEvent.click(screen.getByRole('button', { name: '현재 위치를 시작점으로' }))
+  expect(onInitialPoseChange).toHaveBeenLastCalledWith({ x: 1.234, y: .876, yaw: -.42, frame_id: 'map' })
+})
+
+test('clicking the selected robot marker in start mode uses its exact pose', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ map_id: 'mock_lab', name: 'Mock Lab', frame_id: 'map', resolution: .1, width: 20, height: 20, origin: { x: 0, y: 0, yaw: 0 }, version: '1', data_url: '/api/v1/maps/mock_lab/data' }), { status: 200 }))
+  const onInitialPoseChange = vi.fn()
+  const current = { ...robot, pose: { x: 1.1, y: .9, yaw: .2 }, pose_freshness: 'FRESH', tf_valid: true }
+  render(<MapPanel robots={[current]} selected="robot_1" mapId="mock_lab" onSelect={() => {}} onInitialPoseChange={onInitialPoseChange} />)
+  await screen.findByText(/목표 미리보기/)
+  fireEvent.click(screen.getByRole('button', { name: '시작점 설정' }))
+  fireEvent.click(document.querySelector('.selected-robot')!)
+  expect(onInitialPoseChange).toHaveBeenLastCalledWith({ x: 1.1, y: .9, yaw: .2, frame_id: 'map' })
+})
+
 test('navigation stays gated until a destination is selected and dispatches the request', async () => {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ map_id: 'mock_lab', name: 'Mock Lab', frame_id: 'map', resolution: .1, width: 20, height: 20, origin: { x: 0, y: 0, yaw: 0 }, version: '1', data_url: '/api/v1/maps/mock_lab/data' }), { status: 200 }))
   const onNavigate = vi.fn()
