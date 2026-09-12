@@ -10,7 +10,7 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 ## 저장소 조사 결과
 
-실물 robot_2에서 확인한 계약은 `cmd_vel` (`Twist`), `odom` (`Odometry`), `battery/percent`·`battery/voltage` (`Float32`), `scan` (`LaserScan`), `tf`/`tf_static`, 그리고 `rosy_control/camera_detect_node`가 발행하는 raw `/camera/front` (`sensor_msgs/msg/Image`)다. 관제용 카메라는 로봇 세션 런처가 `/camera/front`를 `/camera/image_raw/compressed` (`sensor_msgs/msg/CompressedImage`)로 변환한 뒤 rosbridge가 전달한다. 기존 frame string과 Nav2 설정은 namespace/frame prefix가 실제 2대 환경에서 올바르게 적용되는지 검증되지 않았다.
+실물 robot_2에서 확인한 계약은 `cmd_vel` (`Twist`), `odom` (`Odometry`), `battery/percent`·`battery/voltage` (`Float32`), `scan` (`LaserScan`), `tf`/`tf_static`, 그리고 `rosy_control/camera_detect_node`가 발행하는 raw `/camera/front` (`sensor_msgs/msg/Image`)다. 관제용 카메라는 로봇 세션 런처가 `/camera/front`를 `/camera/image_raw/compressed` (`sensor_msgs/msg/CompressedImage`)로 변환한 뒤 rosbridge가 전달한다. 이 로봇의 Python libcamera 0.3.2와 `/usr/local` IPA는 ROS Jazzy libpisp 1.5.0과 ABI가 다르므로, 세션 런처는 카메라 프로세스에 호환되는 `/usr/local` libpisp 1.0.7을 우선 적용한다. 기존 frame string과 Nav2 설정은 namespace/frame prefix가 실제 2대 환경에서 올바르게 적용되는지 검증되지 않았다.
 
 현재 확인되지 않았거나 제공되지 않은 항목은 다음과 같다.
 
@@ -24,4 +24,4 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 ## 실행하지 않은 현장 검증
 
-robot_2 현장 시험에서는 domain 13의 `/camera/front` publisher와 raw-to-compressed republisher를 확인했으며, 압축 토픽의 rosbridge 구독도 확인했다. 단, 다중 publisher가 남아 있으면 카메라 장치 충돌이 발생하므로 `deployment/scripts/start-pinky-robot2-session.sh`가 중복 camera/republisher/rosbridge를 거부하도록 했다. 실제 영상이 관제 화면에 도착하는지와 stop/watchdog, action 결과 및 이동 시험은 별도 현장 gate에서 확인해야 한다. mock/transport contract test 통과는 실물 안전 제어의 증거가 아니다.
+robot_2 현장 시험에서는 호환 라이브러리 우선 적용 후 domain 13의 카메라가 `320x240 @ 8Hz`로 초기화되는 것을 확인했다. `/camera/front` publisher와 raw-to-compressed republisher, 압축 토픽의 rosbridge 구독은 세션 런처 통합 시험에서 확인한다. 단, 다중 publisher가 남아 있으면 카메라 장치 충돌이 발생하므로 `deployment/scripts/start-pinky-robot2-session.sh`가 중복 camera/republisher/rosbridge를 거부하고, 실패 시 자식 프로세스까지 정리하도록 했다. 실제 영상이 관제 화면에 도착하는지와 stop/watchdog, action 결과 및 이동 시험은 별도 현장 gate에서 확인해야 한다. mock/transport contract test 통과는 실물 안전 제어의 증거가 아니다.

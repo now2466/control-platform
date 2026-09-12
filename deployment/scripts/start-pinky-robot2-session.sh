@@ -18,6 +18,17 @@ COMPRESSED_TOPIC="/camera/image_raw/compressed"
 camera_pid=""
 republisher_pid=""
 rosbridge_pid=""
+cleanup_done=0
+
+camera_library_path="${PINKY_CAMERA_LD_LIBRARY_PATH:-${LD_LIBRARY_PATH:-}}"
+
+if [[ -f /usr/local/lib/aarch64-linux-gnu/libpisp.so.1 ]]; then
+  # camera_detect_node uses the Raspberry Pi libcamera 0.3.x Python stack.
+  # ROS Jazzy also ships libpisp, but its ABI is not compatible with the
+  # /usr/local libcamera IPA module on this robot. Prefer the matching local
+  # camera libraries for this process only.
+  camera_library_path="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:$camera_library_path"
+fi
 
 fail() {
   echo "ERROR: $*" >&2
@@ -25,13 +36,17 @@ fail() {
 }
 
 cleanup() {
+  [[ "$cleanup_done" -eq 0 ]] || return
+  cleanup_done=1
   set +e
   for pid in "$republisher_pid" "$camera_pid" "$rosbridge_pid"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -INT "$pid" 2>/dev/null
+    if [[ -n "$pid" ]]; then
+      # Each process is started in its own session so ros2run's child (for
+      # example the Python rosbridge server) is stopped together with it.
+      kill -INT -- "-$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null
     fi
   done
-  wait "$republisher_pid" "$camera_pid" "$rosbridge_pid" 2>/dev/null
+  wait "$republisher_pid" "$camera_pid" "$rosbridge_pid" 2>/dev/null || true
 }
 
 wait_for_publisher() {
@@ -52,7 +67,8 @@ wait_for_publisher() {
   return 1
 }
 
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 source /opt/ros/jazzy/setup.bash
 source "$PINKY_WS/install/setup.bash"
@@ -88,11 +104,11 @@ existing_bridge="$(pgrep -u "$(id -un)" -f "[r]osbridge_websocket.*--port.*${ROS
 [[ -z "$existing_bridge" ]] || fail "rosbridge is already running on port $ROSBRIDGE_PORT (PID(s): $existing_bridge)"
 
 echo "Starting rosbridge on port $ROSBRIDGE_PORT (ROS_DOMAIN_ID=$ROS_DOMAIN_ID)..."
-ros2 run rosbridge_server rosbridge_websocket --port "$ROSBRIDGE_PORT" &
+setsid ros2 run rosbridge_server rosbridge_websocket --port "$ROSBRIDGE_PORT" &
 rosbridge_pid=$!
 
 echo "Starting Pinky camera publisher..."
-ros2 run rosy_control camera_detect_node --ros-args \
+setsid env "LD_LIBRARY_PATH=$camera_library_path" ros2 run rosy_control camera_detect_node --ros-args \
   --params-file "$CONFIG_DIR/robot.yaml" \
   --params-file "$CONFIG_DIR/camera.yaml" &
 camera_pid=$!
@@ -102,7 +118,7 @@ if ! wait_for_publisher "$CAMERA_TOPIC" "$camera_pid" 30; then
 fi
 
 echo "Starting raw-to-compressed image republisher..."
-ros2 run image_transport republish raw compressed --ros-args \
+setsid ros2 run image_transport republish raw compressed --ros-args \
   -p in_transport:=raw \
   -p out_transport:=compressed \
   -r in:="$CAMERA_TOPIC" \
