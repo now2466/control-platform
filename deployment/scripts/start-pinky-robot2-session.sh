@@ -6,6 +6,8 @@ set -Eeuo pipefail
 # bringup_robot.launch.xml in its own terminal and keep the robot stationary
 # while starting or stopping this session.
 
+set -Eeo pipefail
+
 PINKY_WS="${PINKY_WS:-/home/pinky/dev_ws/wj}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-13}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9091}"
@@ -55,6 +57,10 @@ trap cleanup EXIT INT TERM
 
 source /opt/ros/jazzy/setup.bash
 source "$PINKY_WS/install/setup.bash"
+
+# ROS setup scripts legitimately read variables that may not exist yet.
+# Enable nounset only after both underlay and overlay have been sourced.
+set -u
 
 unset ROS_LOCALHOST_ONLY
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
