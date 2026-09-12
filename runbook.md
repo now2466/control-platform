@@ -92,6 +92,7 @@ T12 ROS 어댑터가 설치된 별도 workspace에서만 수행한다. `/etc/pin
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+sudo apt-get update
 sudo apt-get install -y ros-jazzy-rosbridge-server
 ros2 pkg prefix rosbridge_server
 ```
