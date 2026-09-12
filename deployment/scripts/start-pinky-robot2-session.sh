@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
 
 # Start the robot-side processes required by the control center for robot_2.
 # The hardware bringup is intentionally left outside this script: run
