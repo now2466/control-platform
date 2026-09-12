@@ -30,6 +30,7 @@ ros/pinky_control_watchdog/ (T12/T15)
 ros/pinky_control_navigation/ (T15)
   package.xml, setup.py, setup.cfg
   launch/robot_nav2.launch.py
+  pinky_control_navigation/nav2_lifecycle_gate.py
   map/map_260905.yaml, map/map_260905.pgm
   params/nav2_params.yaml
 backend/
@@ -259,9 +260,9 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 - [x] 활성 정적 지도에서 시작점·도착점의 자유/미상 셀을 서버에서 재검증하고, lease·신선도·정지·편대·임무·capability gate를 적용한다.
 - [x] `위치 재설정(AMCL)`과 `시작점에서 도착점으로 이동` UI/API를 추가했다. 지도 클릭만으로 주행하지 않으며, 위치 재설정은 `/initialpose`만 발행한다.
 - [x] 시작점 `/initialpose` → `AUTO` → `NavigateToPose` 순서를 backend/watchdog에 연결하고, Nav2 출력은 `/control/nav_velocity`, 최종 `/cmd_vel`은 watchdog 단일 publisher로 구성했다.
-- [x] `map_260905.world`에서 동일한 `map_260905.pgm/.yaml`을 패키징하고, session script가 watchdog·AMCL·Nav2를 선택적으로 시작하도록 했다. `stop`/정지 해제 뒤 자동 재개하지 않는다.
+- [x] `map_260905.world`에서 동일한 `map_260905.pgm/.yaml`을 패키징하고, session script가 watchdog·SLLidar start·AMCL·Nav2를 선택적으로 시작하도록 했다. navigation lifecycle은 `map→base_footprint` TF가 확인될 때까지 대기·재시도하며, `stop`/정지 해제 뒤 자동 재개하지 않는다.
 - [x] 로봇을 들어 옮긴 뒤 새 시작점으로 재현지화하는 mock/API/UI 테스트와 문서를 갱신했다.
-- [ ] robot_2에서 새 패키지를 `colcon build`하고 `/navigate_to_pose` action server·AMCL lifecycle·`map→odom→base_footprint` TF를 확인한다.
+- [ ] robot_2에서 새 패키지를 `colcon build`하고 `/navigate_to_pose` action server·AMCL lifecycle·TF 대기 후 navigation lifecycle 활성화·`map→odom→base_footprint` TF를 확인한다.
 - [ ] 실제 현장에서는 우측 상단 모서리 자체가 아닌 안쪽의 자유 셀을 시작점으로 선택해 저속 주행·정지·재설정·재주행을 검증한다. 충돌 위험 시 물리적으로 들어 옮기기 전에 정지 확인을 완료한다.
 
 검증:
@@ -272,6 +273,8 @@ cd ../frontend && npm test -- --run src/MapPanel.test.tsx src/T05.test.tsx
 source /opt/ros/jazzy/setup.bash
 ros2 action list -t | grep navigate_to_pose
 ros2 lifecycle get /amcl
+ros2 lifecycle get /planner_server
+ros2 lifecycle get /bt_navigator
 ros2 run tf2_ros tf2_echo map base_footprint
 ```
 

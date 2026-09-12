@@ -147,6 +147,12 @@ ros2 pkg prefix nav2_bt_navigator nav2_amcl nav2_map_server
 
 ### 6.2 무이동 기동과 graph 확인
 
+workspace를 섞지 않는다. 터미널 A의 hardware bringup은 Pinky Pro 원본 workspace
+(`~/pinky_pro`)에서 실행하고, 터미널 B의 control session/Nav2는 별도 overlay
+workspace (`~/dev_ws/wj`)를 사용한다. 두 프로세스는 ROS_DOMAIN_ID 13과 ROS
+토픽 graph로 연결되며, session script가 자체적으로 `wj/install/setup.bash`를
+source한다.
+
 터미널 A에서 hardware bringup을 유지한다.
 
 ```bash
@@ -154,11 +160,11 @@ unset ROS_LOCALHOST_ONLY
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 export ROS_DOMAIN_ID=13
 source /opt/ros/jazzy/setup.bash
-source /home/pinky/dev_ws/wj/install/setup.bash
+source /home/pinky/pinky_pro/install/setup.bash
 ros2 launch pinky_bringup bringup_robot.launch.xml
 ```
 
-터미널 B에서는 기존 user service나 수동으로 켜 둔 중복 프로세스를 정리한 뒤 session script를 실행한다. 스크립트는 bringup을 시작·종료하지 않는다.
+터미널 B에서는 기존 user service나 수동으로 켜 둔 중복 프로세스를 정리한 뒤 session script를 실행한다. 스크립트는 bringup을 시작·종료하지 않지만, `START_NAV2=1`이면 bringup이 제공하는 `/start_motor`를 호출해 SLLidar를 시작한다.
 
 ```bash
 systemctl --user stop rosy-session-control.service 2>/dev/null || true
@@ -177,13 +183,15 @@ ros2 action list -t | grep navigate_to_pose
 ros2 lifecycle get /map_server
 ros2 lifecycle get /amcl
 ros2 lifecycle get /controller_server
+ros2 lifecycle get /planner_server
+ros2 lifecycle get /bt_navigator
 ros2 topic info /control/status -v
 ros2 topic info /control/nav_velocity -v
 ros2 topic info /cmd_vel -v
 ros2 run tf2_ros tf2_echo map base_footprint
 ```
 
-AMCL은 초기 위치를 받기 전 `map→odom`을 만들지 않을 수 있다. `map→odom→base_footprint`가 확인되지 않으면 goal을 보내지 말고, 관제에서 시작점을 지정한 뒤 `위치 재설정(AMCL)`을 수행한다. Nav2 controller/recovery가 `/control/nav_velocity`로 출력되고 `/cmd_vel` publisher가 watchdog 하나인지 확인한다. `ros2 topic info -v`에서 publisher/subscriber QoS가 맞지 않으면 먼저 QoS를 수정한다.
+AMCL은 초기 위치를 받기 전 `map→odom`을 만들지 않을 수 있다. 정지 해제는 TF 생성 동작이 아니다. 관제에서 시작점을 지정한 뒤 `위치 재설정(AMCL)`을 수행하면 navigation lifecycle gate가 `map→base_footprint` TF를 최대 0.5초 주기로 확인하고 Nav2 startup을 재시도한다. `map→odom→base_footprint`가 확인되고 `/planner_server`, `/bt_navigator`가 `active`가 되기 전에는 goal을 보내지 않는다. Nav2 controller/recovery가 `/control/nav_velocity`로 출력되고 `/cmd_vel` publisher가 watchdog 하나인지 확인한다. `ros2 topic info -v`에서 publisher/subscriber QoS가 맞지 않으면 먼저 QoS를 수정한다.
 
 Nav2를 아직 준비하지 않고 영상·rosbridge·watchdog만 확인하려면 다음처럼 실행할 수 있다. 이 모드에서는 지도 자동 주행 버튼이 비활성화된다.
 
@@ -196,7 +204,8 @@ START_NAV2=0 /home/pinky/start-pinky-robot2-session.sh
 1. 전체 또는 `robot_2` 정지를 요청하고 `CONFIRMED`/속도 0을 확인한다. 물리적으로도 로봇을 잡을 수 있는 상태인지 확인한다.
 2. 로봇을 실제 현장의 새 위치에 놓고, 그 위치에 대응하는 지도 자유 셀을 `시작점 설정`으로 클릭·드래그한다. 우측 상단에서 시험하더라도 모서리 벽 셀 자체가 아니라 조금 안쪽의 바닥 셀을 선택한다.
 3. `위치 재설정(AMCL)`을 누른다. 이것은 `/initialpose`를 전달해 AMCL 추정 위치만 바꾸며 `map_260905`를 삭제하거나 다시 그리지 않는다.
-4. 정지 래치가 있으면 `robot_2 정지 해제`를 명시적으로 수행한다. 이전 목표는 자동 재개되지 않는다.
-5. 새 `도착점 설정`을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
+4. 지도에 `map→odom→base_footprint` TF가 나타나고 Nav2 planner/BT가 active가 될 때까지 잠시 기다린다. 정지 해제는 이 대기를 대신하지 않는다.
+5. 정지 래치가 있으면 `robot_2 정지 해제`를 명시적으로 수행한다. 이전 목표는 자동 재개되지 않는다.
+6. 새 `도착점 설정`을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
 
 시작점·도착점이 점유/미상 셀이면 API가 `MAP_POINT_BLOCKED`로 거부한다. 시험 중 충돌·이상 상황이 다시 발생하면 같은 절차를 반복한다. `stop`은 활성 Nav2 goal을 취소하므로, 정지 해제만으로 로봇이 다시 움직이지 않아야 한다.

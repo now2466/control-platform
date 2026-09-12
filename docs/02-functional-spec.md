@@ -133,6 +133,10 @@ type Command = {
 
 서버는 활성 지도·map frame·점유 상태·로봇 신선도·정지·편대/임무 상태·`navigate` capability를 확인한다. 시작점 또는 도착점이 점유/미상 셀이면 `MAP_POINT_BLOCKED`로 거부한다. 수락된 요청은 시작점 `/initialpose` → `AUTO` 모드 → 로봇 watchdog의 `NavigateToPose` action 요청 순서로 실행된다. Nav2 controller/recovery 출력은 `/control/nav_velocity`로만 들어가고 watchdog만 최종 `/cmd_vel`을 발행한다. `stop`은 Nav2 goal을 취소하며, 통신 복구나 정지 해제 후 자동 재개하지 않는다.
 
+AMCL이 `/initialpose`를 받은 뒤 `map→odom→base_footprint` TF를 발행하기까지는 수 초가 걸릴 수 있다. 정지 해제는 이 TF를 대신 만들지 않는다. robot_2 Nav2 session은 고정된 2초 타이머로 navigation lifecycle을 활성화하지 않고, 해당 TF가 확인될 때까지 lifecycle startup을 대기·재시도한다. TF가 확인되기 전에는 지도 주행 버튼을 비활성화하고, TF가 사라지거나 startup이 실패해도 goal을 전송하지 않는다.
+
+Nav2 session은 navigation을 시작하기 전에 hardware bringup의 `/start_motor` 서비스를 호출해 SLLidar 스캔을 시작한다. `/scan`이 발행되지 않으면 AMCL과 map TF가 준비되지 않으므로 session을 명확한 오류로 종료하며, 라이다 publisher가 토픽에 등록된 것만으로 준비 완료로 간주하지 않는다.
+
 지도 가장자리의 픽셀은 벽으로 rasterize될 수 있으므로 화면 우측 상단 모서리 자체를 시작점으로 사용하지 않는다. 실제 시작 위치와 일치하는 우측 상단 안쪽의 자유 셀을 클릭한다.
 
 ## 5. REST·실시간 API

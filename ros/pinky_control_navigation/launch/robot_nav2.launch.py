@@ -118,7 +118,10 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[
             {
                 "use_sim_time": use_sim_time,
-                "autostart": autostart,
+                # The lifecycle gate starts this group only after AMCL has
+                # produced map -> base_footprint. A fixed-time autostart can
+                # permanently leave planner/costmaps inactive.
+                "autostart": False,
                 "node_names": [
                     "controller_server",
                     "planner_server",
@@ -126,6 +129,19 @@ def generate_launch_description() -> LaunchDescription:
                     "bt_navigator",
                     "waypoint_follower",
                 ],
+            }
+        ],
+    )
+    navigation_gate = Node(
+        package="pinky_control_navigation",
+        executable="nav2_lifecycle_gate",
+        name="nav2_lifecycle_gate",
+        output="screen",
+        parameters=[
+            {
+                "manager_service": "/lifecycle_manager_navigation/manage_nodes",
+                "global_frame": "map",
+                "base_frame": "base_footprint",
             }
         ],
     )
@@ -149,10 +165,11 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("log_level", default_value="info"),
             *localization_nodes,
             localization_manager,
-            # Let map_server/amcl reach ACTIVE before costmaps configure.
+            # Let map_server/amcl start first, then keep the navigation group
+            # idle until nav2_lifecycle_gate sees the AMCL map TF.
             TimerAction(
                 period=2.0,
-                actions=[*navigation_nodes, navigation_manager],
+                actions=[*navigation_nodes, navigation_manager, navigation_gate],
             ),
         ]
     )

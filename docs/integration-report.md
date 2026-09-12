@@ -27,7 +27,7 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 관제의 `/robots/{id}/navigate`는 start pose와 goal이 활성 정적 지도에서 자유 셀인지, 선택 로봇이 ONLINE/FRESH·정지·IDLE·편대 해제인지, lease와 `navigate` capability가 유효한지 확인한다. 수락된 실행은 `/initialpose` → `AUTO` → watchdog의 `NavigateToPose` action 순서다. `/robots/{id}/localization-reset`은 로봇을 들어 옮긴 뒤 `/initialpose`만 발행하며, 정적 지도나 SLAM 상태를 초기화하지 않는다.
 
-robot_2 session script는 `START_NAV2=1`일 때 watchdog 이후 `pinky_control_navigation`을 시작하고 `/navigate_to_pose` action server가 보일 때까지 기다린다. Nav2 controller/recovery는 `/control/nav_velocity`로 remap되고 최종 `/cmd_vel`은 watchdog 하나만 발행한다. `stop`, `reset_stop`, `cancel_navigation`은 활성 goal을 취소하며 자동 재개하지 않는다.
+robot_2 session script는 `START_NAV2=1`일 때 watchdog 뒤 SLLidar의 `/start_motor`를 호출하고 `pinky_control_navigation`을 시작한 뒤 `/navigate_to_pose` action server가 보일 때까지 기다린다. navigation lifecycle gate는 `map→base_footprint` TF가 확인된 뒤에만 lifecycle manager startup을 호출하고 실패 시 재시도한다. Nav2 controller/recovery는 `/control/nav_velocity`로 remap되고 최종 `/cmd_vel`은 watchdog 하나만 발행한다. `stop`, `reset_stop`, `cancel_navigation`은 활성 goal을 취소하며 자동 재개하지 않는다.
 
 mock API/UI와 launch/package syntax, robot_2의 세 패키지 build는 검증했다. 다음은 실제 로봇에서 아직 실행하지 않은 gate다: map server/AMCL/Nav2 lifecycle active, 실제 `map→odom→base_footprint` TF, 라이다 costmap 장애물 반영, action acceptance/result, 저속 이동·정지·수동 재배치 후 재현지화.
 

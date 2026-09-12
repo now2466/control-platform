@@ -21,9 +21,9 @@
 
 `RosbridgeAdapter`는 `/tf`·`/tf_static`과 odom을 함께 받아 `map → odom → base`를 2D로 합성하고, 검증된 경우에만 공통 map 좌표로 상태를 노출한다. 초기 위치는 정지 조건을 통과한 뒤 설정한 initial pose 토픽(실물 Pinky `/initialpose`)에 `PoseWithCovarianceStamped`로 발행하며, 수동 속도는 설정한 중재 토픽(실물 Pinky `/control/manual_velocity`)으로만 발행한다. 지도 주행은 start pose를 먼저 발행하고 `AUTO`와 `navigate` ControlCommand를 요청한다. 최종 `/cmd_vel`은 로봇 측 안전 중재기가 담당한다.
 
-robot_2 실물 카메라 smoke 절차는 `deployment/scripts/start-pinky-robot2-session.sh`로 고정한다. bringup은 별도로 유지하고, 스크립트가 domain 13의 `camera_detect_node` `/camera/front`, `image_transport` raw→compressed 변환, rosbridge `9091`을 하나의 수명 주기로 관리한다. 시작 전 중복 camera/republisher/rosbridge를 거부하며, 원본 publisher와 compressed publisher가 각각 나타난 뒤에만 READY를 출력한다.
+robot_2 실물 camera/Nav2 smoke 절차는 `deployment/scripts/start-pinky-robot2-session.sh`로 고정한다. bringup은 별도로 유지하고, `START_NAV2=1`이면 스크립트가 먼저 `/start_motor`로 SLLidar를 시작한 뒤 domain 13의 `camera_detect_node` `/camera/front`, `image_transport` raw→compressed 변환, rosbridge `9091`을 하나의 수명 주기로 관리한다. 시작 전 중복 camera/republisher/rosbridge를 거부하며, 원본 publisher와 compressed publisher가 각각 나타난 뒤에만 READY를 출력한다.
 
-`ros/pinky_control_interfaces`의 `ControlCommand`와 `ControlStatus`, `ros/pinky_control_watchdog`의 단일 출력 중재기를 추가했다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 중재기는 startup stop latch, `reset_stop` 후 자동 재개 금지, `MANUAL` mode gate, 0.35초 deadman, 0.15m/s·0.50rad/s clamp를 적용하고 `/cmd_vel`에 `Twist`만 발행한다. `navigate`는 Nav2 `NavigateToPose` action client로 연결하고 stop/reset/cancel 시 활성 goal을 취소한다. `ros/pinky_control_navigation`은 `map_260905.world`와 동일한 정적 map server/AMCL/Nav2 구성을 제공한다. 서버가 설치되지 않은 환경의 주행·편대 제어 요청은 계속 `UNSUPPORTED`다. robot_2 local deployment만 설치·무이동 확인 뒤 `control_available=true`로 전환한다.
+`ros/pinky_control_interfaces`의 `ControlCommand`와 `ControlStatus`, `ros/pinky_control_watchdog`의 단일 출력 중재기를 추가했다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 중재기는 startup stop latch, `reset_stop` 후 자동 재개 금지, `MANUAL` mode gate, 0.35초 deadman, 0.15m/s·0.50rad/s clamp를 적용하고 `/cmd_vel`에 `Twist`만 발행한다. `navigate`는 Nav2 `NavigateToPose` action client로 연결하고 stop/reset/cancel 시 활성 goal을 취소한다. `ros/pinky_control_navigation`은 `map_260905.world`와 동일한 정적 map server/AMCL/Nav2 구성을 제공하며, navigation lifecycle은 고정 지연 대신 AMCL의 `map→base_footprint` TF를 확인한 뒤 startup을 재시도한다. 서버가 설치되지 않은 환경의 주행·편대 제어 요청은 계속 `UNSUPPORTED`다. robot_2 local deployment만 설치·무이동 확인 뒤 `control_available=true`로 전환한다.
 
 ## 검증
 
@@ -41,6 +41,10 @@ bash -n deployment/scripts/start-pinky-robot2-session.sh
 
 로봇 workspace 설치 후에는 다음을 무이동 상태에서 확인한다.
 
+hardware bringup(`pinky_bringup`, `sllidar_ros2`)은 `~/pinky_pro`에서, control
+watchdog·Nav2·camera session은 `~/dev_ws/wj`에서 각각 source한다. `pinky_pro`를
+`wj` 위에 다시 source해 overlay를 덮어쓰지 않는다.
+
 ```text
 colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog pinky_control_navigation
 ros2 topic info /control/status -v
@@ -48,6 +52,8 @@ ros2 service type /control/command
 ros2 topic info /cmd_vel -v
 ros2 action list -t | grep navigate_to_pose
 ros2 lifecycle get /amcl
+ros2 lifecycle get /planner_server
+ros2 lifecycle get /bt_navigator
 ```
 
-이후 `reset_stop`·`set_mode(MANUAL)` 응답, 수동 입력 중 `/cmd_vel`, 입력 중단 0.35초 이내 정지, `navigate` capability와 `/navigate_to_pose` action server를 무이동 상태에서 확인한 뒤에만 바퀴를 지면에 둔 저속 시험으로 진행한다. 로봇을 들어 옮긴 뒤에는 정지 확인 → 새 시작점 지정 → `localization-reset`/AMCL → 명시적 정지 해제 → 새 도착점 요청 순서를 지킨다. 정적 지도는 초기화하지 않는다.
+이후 `reset_stop`·`set_mode(MANUAL)` 응답, 수동 입력 중 `/cmd_vel`, 입력 중단 0.35초 이내 정지, `navigate` capability와 `/navigate_to_pose` action server를 무이동 상태에서 확인한다. 초기 위치를 보낸 뒤 `map→odom→base_footprint` TF와 `/planner_server`, `/bt_navigator`의 ACTIVE를 확인한 뒤에만 바퀴를 지면에 둔 저속 시험으로 진행한다. 로봇을 들어 옮긴 뒤에는 정지 확인 → 새 시작점 지정 → `localization-reset`/AMCL → TF 대기 → 명시적 정지 해제 → 새 도착점 요청 순서를 지킨다. 정적 지도는 초기화하지 않는다.

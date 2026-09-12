@@ -84,6 +84,24 @@ wait_for_action_server() {
   return 1
 }
 
+start_lidar_motor() {
+  local attempt
+  local services
+
+  echo "Starting SLLidar motor..."
+  for ((attempt = 1; attempt <= 15; attempt++)); do
+    services="$(timeout 5s ros2 service list 2>/dev/null || true)"
+    if grep -Fxq "/start_motor" <<<"$services"; then
+      if timeout 10s ros2 service call /start_motor std_srvs/srv/Empty "{}" >/dev/null 2>&1; then
+        echo "SLLidar motor is running."
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  fail "SLLidar /start_motor service did not become ready; /scan and map TF cannot be produced"
+}
+
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
@@ -160,6 +178,7 @@ if ! wait_for_publisher "$CONTROL_STATUS_TOPIC" "$watchdog_pid" 15; then
 fi
 
 if [[ "$START_NAV2" == "1" ]]; then
+  start_lidar_motor
   echo "Starting Pinky Nav2 on map_260905..."
   setsid ros2 launch pinky_control_navigation robot_nav2.launch.py use_sim_time:=false &
   nav2_pid=$!

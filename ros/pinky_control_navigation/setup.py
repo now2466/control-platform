@@ -15,5 +15,9 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    entry_points={"console_scripts": []},
+    entry_points={
+        "console_scripts": [
+            "nav2_lifecycle_gate = pinky_control_navigation.nav2_lifecycle_gate:main",
+        ],
+    },
 )
