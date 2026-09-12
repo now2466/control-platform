@@ -23,6 +23,8 @@
 
 robot_2 실물 camera/Nav2 smoke 절차는 `deployment/scripts/start-pinky-robot2-session.sh`로 고정한다. bringup은 별도로 유지하고, `START_NAV2=1`이면 스크립트가 먼저 `/start_motor`로 SLLidar를 시작한 뒤 domain 13의 `camera_detect_node` `/camera/front`, `image_transport` raw→compressed 변환, rosbridge `9091`을 하나의 수명 주기로 관리한다. 시작 전 중복 camera/republisher/rosbridge를 거부하며, 원본 publisher와 compressed publisher가 각각 나타난 뒤에만 READY를 출력한다.
 
+재부팅 후 기본 smoke 진입점은 `deployment/scripts/start-pinky-robot2-all.sh`다. wrapper는 domain 0의 기존 user service를 중지하고 domain 13 hardware bringup에서 `/odom`과 `/scan` publisher를 확인한 뒤 위 session script를 시작한다. compressed camera와 `/navigate_to_pose` action을 확인하기 전에는 all-in-one READY를 출력하지 않는다. wrapper의 `Ctrl+C` cleanup은 session을 먼저 종료하고 bringup을 나중에 종료한다. 기존 session script 단독 실행은 bringup/session 분리 진단용으로 유지한다.
+
 `ros/pinky_control_interfaces`의 `ControlCommand`와 `ControlStatus`, `ros/pinky_control_watchdog`의 단일 출력 중재기를 추가했다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 중재기는 startup stop latch, `reset_stop` 후 자동 재개 금지, `MANUAL` mode gate, 0.35초 deadman, 0.15m/s·0.50rad/s clamp를 적용하고 `/cmd_vel`에 `Twist`만 발행한다. `navigate`는 Nav2 `NavigateToPose` action client로 연결하고 stop/reset/cancel 시 활성 goal을 취소한다. `ros/pinky_control_navigation`은 `map_260905.world`와 동일한 정적 map server/AMCL/Nav2 구성을 제공하며, navigation lifecycle은 고정 지연 대신 AMCL의 `map→base_footprint` TF를 확인한 뒤 startup을 재시도한다. 서버가 설치되지 않은 환경의 주행·편대 제어 요청은 계속 `UNSUPPORTED`다. robot_2 local deployment만 설치·무이동 확인 뒤 `control_available=true`로 전환한다.
 
 ## 검증
@@ -37,6 +39,7 @@ cd backend && .venv/bin/python -m pytest tests/test_rosbridge_adapter.py tests/t
 
 ```text
 bash -n deployment/scripts/start-pinky-robot2-session.sh
+bash -n deployment/scripts/start-pinky-robot2-all.sh
 ```
 
 로봇 workspace 설치 후에는 다음을 무이동 상태에서 확인한다.

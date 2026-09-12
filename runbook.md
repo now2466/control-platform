@@ -157,6 +157,24 @@ workspace (`~/dev_ws/wj`)를 사용한다. 두 프로세스는 ROS_DOMAIN_ID 13�
 토픽 graph로 연결되며, session script가 자체적으로 `wj/install/setup.bash`를
 source한다.
 
+일상적인 재부팅 후 기동은 위 두 workspace와 기존 부팅 서비스를 통합 관리하는
+wrapper 한 개를 사용한다. 로봇이 부팅된 뒤 PC를 로봇 Wi-Fi에 연결하고 다음을
+실행한다.
+
+```bash
+ssh pinky@192.168.4.1
+/home/pinky/start-robot2.sh
+```
+
+wrapper는 기존 domain 0 user service를 중지하고 domain 13의 hardware bringup을
+시작한다. `/odom`·`/scan` publisher를 확인한 뒤 rosbridge·watchdog·Nav2·카메라
+session을 시작하며, action server와 compressed camera가 확인된 뒤
+`Robot_2 all-in-one session is ready.`를 출력한다. `Ctrl+C` 한 번으로 session과
+bringup을 역순 종료한다. 재부팅 뒤에는 AMCL 위치가 사라지므로 READY 이후에도
+웹에서 실제 위치·방향을 지정하고 `위치 재설정(AMCL)`을 수행해야 한다.
+
+아래의 터미널 A/B 절차는 통합 wrapper가 실패했을 때의 분리 진단 절차다.
+
 터미널 A에서 hardware bringup을 유지한다.
 
 ```bash

@@ -29,6 +29,8 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 robot_2 session script는 `START_NAV2=1`일 때 watchdog 뒤 SLLidar의 `/start_motor`를 호출하고 `pinky_control_navigation`을 시작한 뒤 `/navigate_to_pose` action server가 보일 때까지 기다린다. navigation lifecycle gate는 `map→base_footprint` TF가 확인된 뒤에만 lifecycle manager startup을 호출하고 실패 시 재시도한다. Nav2 controller/recovery는 `/control/nav_velocity`로 remap되고 최종 `/cmd_vel`은 watchdog 하나만 발행한다. `stop`, `reset_stop`, `cancel_navigation`은 활성 goal을 취소하며 자동 재개하지 않는다.
 
+재부팅 후 수동 단계 누락을 줄이기 위해 `deployment/scripts/start-pinky-robot2-all.sh`를 추가했다. 이 wrapper는 부팅 시 domain 0으로 시작되는 기존 rosy bringup/control user service를 중지하고, domain 13 hardware bringup의 `/odom`·`/scan`을 확인한 뒤 기존 session script를 시작한다. compressed camera와 `/navigate_to_pose`까지 확인된 뒤에만 all-in-one READY를 표시하며, 종료 시 session을 먼저 내리고 bringup을 종료한다. AMCL 초기 위치는 의도적으로 자동 복구하지 않으며 매 재부팅 후 현장 위치·방향을 웹에서 다시 지정해야 한다.
+
 mock API/UI와 launch/package syntax, robot_2의 세 패키지 build는 검증했다. 실제 로봇에서는 map server/AMCL/Nav2 lifecycle active, `map→odom→base_footprint` TF, action acceptance/result와 1차 저속 이동까지 확인했다. 남은 gate는 라이다 costmap 장애물 반영, 조정된 허용오차의 반복 도착 정밀도, 정지 및 수동 재배치 후 재현지화다.
 
 robot_2 1차 현장 주행에서 `/scan` 약 10Hz, AMCL·Nav2 lifecycle active, `map→odom→base_footprint` TF, `/navigate_to_pose` action acceptance와 실제 이동을 확인했다. 마지막 action은 `SUCCEEDED`였지만 목표 `(1.20, -0.04)` 대비 정지 pose가 약 `(1.20, 0.18)`로 0.22m 일찍 멈췄다. 이는 `general_goal_checker.xy_goal_tolerance=0.25` 안에 들어온 정상 판정이므로 현장 클릭 주행 설정을 `xy_goal_tolerance=0.08`, `yaw_goal_tolerance=0.17`로 강화했다. 조정값의 반복 도착 정밀도와 장애물 회피는 아직 현장 gate다.
