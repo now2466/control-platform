@@ -169,7 +169,7 @@ ADMIN은 다음 값을 변경할 수 있다.
 
 초기 위치는 먼저 로봇 카드나 지도에서 대상을 선택하고, 지도에서 `시작점 설정`으로 후보를 찍은 뒤 X, Y, Yaw를 확인하고 `초기 위치 적용`을 누른다. 로봇이 정지하고 편대가 해제되며 지도 TF가 유효한 상태에서만 적용한다.
 
-ROS 모드에서는 초기 위치가 `{ns}/initialpose`로, 수동 입력이 `{ns}/control/manual_velocity`로 전달된다. 로봇 측 control/follow 계약, 최종 cmd_vel 중재기, 정지 래치·watchdog가 준비되기 전에는 주행 제어를 열지 않는다.
+ROS 모드에서는 배포 설정에 지정된 초기 위치·수동 입력 토픽으로 전달된다. 실물 Pinky 매핑은 `/initialpose`와 `/control/manual_velocity`이며, 시뮬레이터처럼 namespace가 필요한 환경은 설정 파일에서 별도로 지정한다. 로봇 측 control/follow 계약, 최종 cmd_vel 중재기, 정지 래치·watchdog가 준비되기 전에는 주행 제어를 열지 않는다.
 
 ## 10. 경고와 운용 이력
 
@@ -217,5 +217,16 @@ Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결
 - 슬레이브 follow controller와 정지 latch/watchdog
 - raw 카메라의 `CompressedImage` 변환
 - `map → robot_N/odom → robot_N/base_footprint` TF 검증
+
+robot_2 실물 카메라·rosbridge 시험에서는 하드웨어 bringup을 별도 터미널에서 실행하고, 나머지 프로세스는 `deployment/scripts/start-pinky-robot2-session.sh` 하나로 실행한다. 이 스크립트는 `ROS_DOMAIN_ID=13`을 설정하고, 기존 `rosy-session-control.service` 중복 실행을 막은 뒤 `camera_detect_node`의 `/camera/front` raw 영상, `/camera/image_raw/compressed` 변환, `rosbridge_websocket:9091`을 순서대로 시작한다. `ROS_LOCALHOST_ONLY`도 해제한다.
+
+로봇에 스크립트를 복사한 뒤 다음처럼 실행한다.
+
+```bash
+scp deployment/scripts/start-pinky-robot2-session.sh pinky@<robot-2-ip>:/home/pinky/
+ssh pinky@<robot-2-ip> 'chmod +x /home/pinky/start-pinky-robot2-session.sh && /home/pinky/start-pinky-robot2-session.sh'
+```
+
+스크립트는 bringup을 시작하거나 종료하지 않는다. 종료 시 `Ctrl+C`를 누르면 스크립트가 시작한 카메라·republisher·rosbridge만 종료한다. 실행 중인 로봇은 정지 상태에서 시험한다.
 
 이 계약이 준비되지 않은 ROS 환경에서 이동 명령이 `UNSUPPORTED`로 거절되는 것은 정상 동작이다. ROS 실행과 현장 인수 절차는 프로젝트 루트의 `runbook.md`와 `acceptance-report.md`를 따른다.

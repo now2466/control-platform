@@ -1,5 +1,7 @@
 # Deployment-only mapping. ROS_DOMAIN_ID is set when each rosbridge process is
 # launched; the control center validates this identity but never changes it.
+# Each bridge is a per-robot isolation boundary, so the robot may keep the
+# global topic names used by the real Pinky bringup (/odom, /tf, ...).
 robots:
   - robot_id: robot_1
     name: Pinky Master
@@ -8,18 +10,18 @@ robots:
     domain_id: 12
     bridge_url: ws://robot-1.local:9090
     topics:
-      odom: /robot_1/odom
-      battery_percent: /robot_1/battery/percent
-      battery_voltage: /robot_1/battery/voltage
-      camera_compressed: /robot_1/camera/image_raw/compressed
-      control_status: /robot_1/control/status
-      path: /robot_1/plan
-      manual_velocity: /robot_1/control/manual_velocity
-      initial_pose: /robot_1/initialpose
+      odom: /odom
+      battery_percent: /battery/percent
+      battery_voltage: /battery/voltage
+      camera_compressed: /camera/image_raw/compressed
+      control_status: /control/status
+      path: /plan
+      manual_velocity: /control/manual_velocity
+      initial_pose: /initialpose
       tf: /tf
       tf_static: /tf_static
     services:
-      control_command: /robot_1/control/command
+      control_command: /control/command
       control_command_type: pinky_control_interfaces/srv/ControlCommand
       control_available: false
     camera:
@@ -32,21 +34,21 @@ robots:
     domain_id: 13
     bridge_url: ws://robot-2.local:9091
     topics:
-      odom: /robot_2/odom
-      battery_percent: /robot_2/battery/percent
-      battery_voltage: /robot_2/battery/voltage
-      camera_compressed: /robot_2/camera/image_raw/compressed
-      control_status: /robot_2/control/status
-      path: /robot_2/plan
-      manual_velocity: /robot_2/control/manual_velocity
-      initial_pose: /robot_2/initialpose
+      odom: /odom
+      battery_percent: /battery/percent
+      battery_voltage: /battery/voltage
+      camera_compressed: /camera/image_raw/compressed
+      control_status: /control/status
+      path: /plan
+      manual_velocity: /control/manual_velocity
+      initial_pose: /initialpose
       tf: /tf
       tf_static: /tf_static
     services:
-      control_command: /robot_2/control/command
+      control_command: /control/command
       control_command_type: pinky_control_interfaces/srv/ControlCommand
       control_available: false
-      follow_command: /robot_2/follow/command
+      follow_command: /follow/command
       follow_command_type: pinky_control_interfaces/srv/FollowCommand
       follow_available: false
     camera:

@@ -19,7 +19,9 @@
 
 `wss://` endpoint에는 security mapping의 `ca_cert_env`, `client_cert_env`/`client_key_env`, `authorization_token_env`를 선택적으로 지정할 수 있다. YAML에는 secret이나 certificate contents가 아닌 environment variable 이름만 저장한다. TLS verification은 기본 활성이고 client certificate/key는 쌍으로만 허용한다.
 
-`RosbridgeAdapter`는 `/tf`·`/tf_static`과 odom을 함께 받아 `map → odom → base`를 2D로 합성하고, 검증된 경우에만 공통 map 좌표로 상태를 노출한다. 초기 위치는 정지 조건을 통과한 뒤 `{ns}/initialpose`에 `PoseWithCovarianceStamped`로 발행하며, 수동 속도는 `{ns}/control/manual_velocity` 중재 토픽으로만 발행한다. 최종 `/cmd_vel`은 로봇 측 안전 중재기가 담당한다.
+`RosbridgeAdapter`는 `/tf`·`/tf_static`과 odom을 함께 받아 `map → odom → base`를 2D로 합성하고, 검증된 경우에만 공통 map 좌표로 상태를 노출한다. 초기 위치는 정지 조건을 통과한 뒤 설정한 initial pose 토픽(실물 Pinky `/initialpose`)에 `PoseWithCovarianceStamped`로 발행하며, 수동 속도는 설정한 중재 토픽(실물 Pinky `/control/manual_velocity`)으로만 발행한다. 최종 `/cmd_vel`은 로봇 측 안전 중재기가 담당한다.
+
+robot_2 실물 카메라 smoke 절차는 `deployment/scripts/start-pinky-robot2-session.sh`로 고정한다. bringup은 별도로 유지하고, 스크립트가 domain 13의 `camera_detect_node` `/camera/front`, `image_transport` raw→compressed 변환, rosbridge `9091`을 하나의 수명 주기로 관리한다. 시작 전 중복 camera/republisher/rosbridge를 거부하며, 원본 publisher와 compressed publisher가 각각 나타난 뒤에만 READY를 출력한다.
 
 현재 `pinky_control_interfaces`의 `ControlCommand`/`FollowCommand` 서버가 실제 로봇 저장소에 설치되어 있고 필드 계약이 일치하는 경우에만 `control_available`/`follow_available`을 true로 바꾼다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 서버가 없거나 계약이 확인되지 않은 상태의 주행·편대 제어 요청은 `UNSUPPORTED`다.
 
@@ -29,4 +31,10 @@
 cd backend && .venv/bin/python -m pytest tests/test_rosbridge_adapter.py tests/test_contracts.py tests/test_cameras.py tests/test_state.py -q
 ```
 
-결과: 27 passed (2026-09-11).
+결과: 29 passed (2026-09-12).
+
+로봇에서 실행할 정적 검증:
+
+```text
+bash -n deployment/scripts/start-pinky-robot2-session.sh
+```

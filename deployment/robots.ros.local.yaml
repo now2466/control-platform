@@ -32,7 +32,7 @@ robots:
     role: SLAVE
     namespace: /robot_2
     domain_id: 13
-    bridge_url: ws://127.0.0.1:9091
+    bridge_url: ws://192.168.4.1:9091
     topics:
       odom: /odom
       battery_percent: /battery/percent

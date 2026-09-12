@@ -165,15 +165,17 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
 
+실물 Pinky bringup이 namespace 없는 전역 토픽을 발행하는 경우에도 로봇별 rosbridge endpoint가 domain 격리 경계이므로, 배포 매핑은 `/odom`, `/battery/percent`, `/battery/voltage`, `/tf`, `/tf_static`, `/initialpose`, `/control/manual_velocity` 같은 전역 이름을 사용할 수 있다. 시뮬레이터 또는 namespace를 제공하는 로봇은 해당 환경의 매핑을 사용한다.
+
 | 입력/출력 | 목표 이름 (`{ns}`는 로봇 namespace) | 타입/처리 |
 |---|---|---|
 | 입력 | `/map`, `/tf`, `/tf_static` | OccupancyGrid, TFMessage. 지도 reliable/transient_local, 동적 TF 기본 tf2 정책 |
 | 입력 | `{ns}/odom`, `{ns}/scan` | Odometry, LaserScan. 센서 best_effort/volatile을 기본으로 발행자 호환 확인 |
 | 입력 | `{ns}/battery/percent`, `battery/voltage` | Float32. percent 값 범위를 실측해 0~100으로 정규화 |
-| 입력 | 설정한 compressed image 토픽 | rosbridge JSON/base64 CompressedImage를 JPEG로 변환. quality/throttle/fragment를 설정하며 별도 binary gateway는 옵션이다. |
+| 입력 | 설정한 compressed image 토픽 | 실물 Pinky는 `/camera/front` raw `Image`를 발행하고, 로봇 세션 런처가 `/camera/image_raw/compressed` `CompressedImage`로 변환한 토픽을 rosbridge JSON/base64로 전달한다. 관제는 이를 JPEG로 변환하며 quality/throttle/fragment를 설정하고 별도 binary gateway는 옵션이다. |
 | 입력 | `{ns}/plan`, `local_costmap/costmap`, `global_costmap/costmap` | Path 및 실제 발행 타입에 맞춘 OccupancyGrid/Costmap 어댑터 |
 | 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 자체 goal handle 추적·취소·결과 확인 |
-| 제어 | `{ns}/initialpose` | PoseWithCovarianceStamped, 정지 시 허용 |
+| 제어 | 설정한 initial pose 토픽 (실물 Pinky: `/initialpose`) | PoseWithCovarianceStamped, 정지 시 허용 |
 | 제어 | `{ns}/set_led`, `{ns}/set_lamp` | 기존 pinky_interfaces 서비스 정의를 읽고 필드 매핑 |
 | 신규 입력 | `{ns}/control/status` | 아래 ControlStatus, 10Hz heartbeat |
 | 신규 제어 | `{ns}/control/command` | 아래 ControlCommand service, reliable, 2초 수락 제한 |
@@ -182,7 +184,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 | 신규 출력 | `{ns}/control/manual_velocity` | TwistStamped, 10Hz. 최종 cmd_vel에 직접 발행 금지 |
 | 신규 출력 | `{ns}/control/heartbeat` | std_msgs/UInt64, 10Hz 증가 counter; 수신 간격으로 watchdog 판단 |
 
-현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API는 `PoseWithCovarianceStamped`를 `{ns}/initialpose`에 발행하며 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 `TwistStamped`를 `{ns}/control/manual_velocity`에 발행하고 최종 `/cmd_vel`은 로봇 측 중재기가 담당한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·안전 중재기는 현장 gate에서 별도 확인한다.
+현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API는 설정한 initial pose 토픽(실물 Pinky는 `/initialpose`)에 `PoseWithCovarianceStamped`를 발행하며 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 설정한 중재 토픽(실물 Pinky는 `/control/manual_velocity`)에 `TwistStamped`를 발행하고 최종 `/cmd_vel`은 로봇 측 중재기가 담당한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·안전 중재기는 현장 gate에서 별도 확인한다.
 
 신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
 

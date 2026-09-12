@@ -57,9 +57,8 @@ def test_ros_config_locks_domain_ids_and_uses_two_endpoints() -> None:
     with pytest.raises(ValidationError, match="separate rosbridge endpoint"):
         RosbridgeConfig.model_validate(data)
     data = load_ros_config().model_dump(mode="python")
-    data["robots"][0]["topics"]["odom"] = "/robot_2/odom"
-    with pytest.raises(ValidationError, match="must stay under /robot_1"):
-        RosbridgeConfig.model_validate(data)
+    data["robots"][0]["topics"]["odom"] = "/odom"
+    assert RosbridgeConfig.model_validate(data).robots[0].topics.odom == "/odom"
     data = load_ros_config().model_dump(mode="python")
     data["robots"][0]["bridge_url"] = "wss://robot-1.local:9090"
     data["robots"][0]["security"] = {"client_cert_env": "ROBOT_CERT"}
@@ -81,15 +80,15 @@ def test_rosbridge_routes_subscriptions_and_commands_to_the_matching_robot() -> 
         adapter = RosbridgeAdapter(enabled_config(), connect_factory=connect)
         await adapter.connect()
         await asyncio.sleep(0)
-        assert {item["topic"] for item in sockets["ws://robot-1.local:9090"].sent} >= {"/robot_1/odom", "/robot_1/camera/image_raw/compressed"}
-        assert {item["topic"] for item in sockets["ws://robot-2.local:9091"].sent} >= {"/robot_2/odom", "/robot_2/camera/image_raw/compressed"}
+        assert {item["topic"] for item in sockets["ws://robot-1.local:9090"].sent} >= {"/odom", "/camera/image_raw/compressed"}
+        assert {item["topic"] for item in sockets["ws://robot-2.local:9091"].sent} >= {"/odom", "/camera/image_raw/compressed"}
 
         accepted = await adapter.execute(CommandRequest(command_id=uuid4(), robot_id="robot_2", operation="stop"))
         assert accepted.accepted is True
         calls_1 = [item for item in sockets["ws://robot-1.local:9090"].sent if item["op"] == "call_service"]
         calls_2 = [item for item in sockets["ws://robot-2.local:9091"].sent if item["op"] == "call_service"]
         assert calls_1 == []
-        assert calls_2[0]["service"] == "/robot_2/control/command"
+        assert calls_2[0]["service"] == "/control/command"
         assert calls_2[0]["args"]["operation"] == "stop"
         events = adapter.drain_events()
         assert events[-1].kind == "command" and events[-1].payload["state"] == "SUCCEEDED"
@@ -102,8 +101,8 @@ def test_rosbridge_decodes_compressed_camera_and_never_treats_odom_as_map_pose()
     async def exercise() -> None:
         adapter = RosbridgeAdapter(load_ros_config())
         jpeg = MockRobotAdapter().frame("robot_1").jpeg
-        await adapter.handle_publish("robot_1", "/robot_1/camera/image_raw/compressed", {"data": base64.b64encode(jpeg).decode(), "header": {"seq": 7}})
-        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+        await adapter.handle_publish("robot_1", "/camera/image_raw/compressed", {"data": base64.b64encode(jpeg).decode(), "header": {"seq": 7}})
+        await adapter.handle_publish("robot_1", "/odom", {
             "header": {"frame_id": "odom"},
             "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
             "twist": {"twist": {"linear": {"x": 0.1}, "angular": {"z": 0.2}}},
@@ -123,7 +122,7 @@ def test_rosbridge_decodes_compressed_camera_and_never_treats_odom_as_map_pose()
 def test_rosbridge_composes_map_tf_with_odom_and_exposes_map_pose() -> None:
     async def exercise() -> None:
         adapter = RosbridgeAdapter(load_ros_config())
-        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+        await adapter.handle_publish("robot_1", "/odom", {
             "header": {"frame_id": "odom"}, "child_frame_id": "base_footprint",
             "pose": {"pose": {"position": {"x": 0.5, "y": 0.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
             "twist": {"twist": {"linear": {"x": 0}, "angular": {"z": 0}}},
@@ -154,10 +153,10 @@ def test_rosbridge_publishes_initial_pose_and_manual_velocity_to_mediator_topics
         velocity = await adapter.publish_manual_velocity("robot_1", 0.1, 0.2)
         assert initial.accepted and velocity.accepted
         sent = sockets["ws://robot-1.local:9090"].sent
-        initial_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/robot_1/initialpose")
+        initial_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/initialpose")
         assert initial_message["type"] == "geometry_msgs/msg/PoseWithCovarianceStamped"
         assert initial_message["msg"]["pose"]["pose"]["position"]["x"] == 1.0
-        velocity_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/robot_1/control/manual_velocity")
+        velocity_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/control/manual_velocity")
         assert velocity_message["type"] == "geometry_msgs/msg/TwistStamped"
         assert velocity_message["msg"]["twist"]["linear"]["x"] == 0.1
         await adapter.close()
@@ -176,7 +175,7 @@ def test_rosbridge_reassembles_bounded_camera_fragments_and_drops_invalid_sets()
     async def exercise() -> None:
         adapter = RosbridgeAdapter(load_ros_config())
         jpeg = MockRobotAdapter().frame("robot_1").jpeg
-        published = json.dumps({"op": "publish", "topic": "/robot_1/camera/image_raw/compressed", "msg": {"data": base64.b64encode(jpeg).decode(), "header": {"seq": 11}}})
+        published = json.dumps({"op": "publish", "topic": "/camera/image_raw/compressed", "msg": {"data": base64.b64encode(jpeg).decode(), "header": {"seq": 11}}})
         split = [published[:100], published[100:500], published[500:]]
         for number in (2, 0, 1):
             data = split[number]
@@ -206,13 +205,13 @@ def test_battery_updates_do_not_refresh_an_old_pose() -> None:
     async def exercise() -> None:
         now = [datetime(2026, 1, 1, tzinfo=UTC)]
         adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
-        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+        await adapter.handle_publish("robot_1", "/odom", {
             "header": {"frame_id": "odom"},
             "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
             "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
         })
         now[0] += timedelta(seconds=2)
-        await adapter.handle_publish("robot_1", "/robot_1/battery/percent", {"data": 86.0})
+        await adapter.handle_publish("robot_1", "/battery/percent", {"data": 86.0})
         observed = StateStore(adapter.snapshot, clock=lambda: now[0]).snapshot().robots[0]
         assert observed.pose_freshness is Freshness.STALE
         assert observed.battery_freshness is Freshness.FRESH
@@ -224,13 +223,13 @@ def test_disconnect_and_reconnect_do_not_revive_old_telemetry() -> None:
     async def exercise() -> None:
         now = [datetime(2026, 1, 1, tzinfo=UTC)]
         adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
-        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+        await adapter.handle_publish("robot_1", "/odom", {
             "header": {"frame_id": "odom"},
             "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
             "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
         })
-        await adapter.handle_publish("robot_1", "/robot_1/battery/percent", {"data": 86.0})
-        await adapter.handle_publish("robot_1", "/robot_1/control/status", {"mode": "MANUAL", "stop_latched": True, "capabilities": ["navigate"]})
+        await adapter.handle_publish("robot_1", "/battery/percent", {"data": 86.0})
+        await adapter.handle_publish("robot_1", "/control/status", {"mode": "MANUAL", "stop_latched": True, "capabilities": ["navigate"]})
         adapter._mark_disconnected("robot_1")
         now[0] += timedelta(milliseconds=100)
         adapter._mark_connected("robot_1")
@@ -248,9 +247,9 @@ def test_camera_sensor_stales_while_odom_continues() -> None:
         now = [datetime(2026, 1, 1, tzinfo=UTC)]
         adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
         jpeg = MockRobotAdapter().frame("robot_1").jpeg
-        await adapter.handle_publish("robot_1", "/robot_1/camera/image_raw/compressed", {"data": base64.b64encode(jpeg).decode()})
+        await adapter.handle_publish("robot_1", "/camera/image_raw/compressed", {"data": base64.b64encode(jpeg).decode()})
         now[0] += timedelta(seconds=2, milliseconds=1)
-        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+        await adapter.handle_publish("robot_1", "/odom", {
             "header": {"frame_id": "odom"},
             "pose": {"pose": {"position": {"x": 1.0, "y": 2.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
             "twist": {"twist": {"linear": {"x": 0.0}, "angular": {"z": 0.0}}},
@@ -265,7 +264,7 @@ def test_camera_sensor_stales_while_odom_continues() -> None:
 def test_path_publish_updates_bounded_robot_snapshot_and_emits_layer_event() -> None:
     async def exercise() -> None:
         adapter = RosbridgeAdapter(load_ros_config())
-        await adapter.handle_publish("robot_1", "/robot_1/plan", {
+        await adapter.handle_publish("robot_1", "/plan", {
             "header": {"frame_id": "map"},
             "poses": [{"pose": {"position": {"x": float(index), "y": 2.0}}} for index in range(205)],
         })
