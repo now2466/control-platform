@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 from pinky_control_center.map_service import MapService
+from pinky_control_center.motion import within_still_tolerance
 from pinky_control_center.models import (
     CommandRequest,
     Connection,
@@ -33,12 +34,7 @@ class NavigationService:
 
     @staticmethod
     def _still(robot) -> bool:
-        return (
-            robot.linear_mps is not None
-            and abs(robot.linear_mps) <= 0.001
-            and robot.angular_rps is not None
-            and abs(robot.angular_rps) <= 0.001
-        )
+        return within_still_tolerance(robot.linear_mps, robot.angular_rps)
 
     def _validate(self, robot_id: str, payload: MapNavigationRequest) -> None:
         settings = self.settings_provider()

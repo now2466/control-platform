@@ -103,7 +103,7 @@ def test_localization_reset_is_available_when_current_map_pose_is_stale(tmp_path
     app = create_app(database_path=tmp_path / "control.db", start_command_worker=False, start_watchdog=False)
     source = app.state.state_store.snapshot_source()
     robots = [
-        robot.model_copy(update={"pose": None, "pose_freshness": Freshness.UNKNOWN, "tf_valid": False})
+        robot.model_copy(update={"pose": None, "pose_freshness": Freshness.UNKNOWN, "tf_valid": False, "linear_mps": 0.0013, "angular_rps": -0.026})
         if robot.robot_id == "robot_1" else robot
         for robot in source.robots
     ]
@@ -124,3 +124,21 @@ def test_localization_reset_is_available_when_current_map_pose_is_stale(tmp_path
         )
 
         assert reset.status_code == 202
+
+        moving = [
+            robot.model_copy(update={"linear_mps": 0.011}) if robot.robot_id == "robot_1" else robot
+            for robot in robots
+        ]
+        app.state.state_store.snapshot_source = lambda: source.model_copy(update={"robots": moving})
+        rejected = client.post(
+            "/api/v1/robots/robot_1/localization-reset",
+            json={
+                "request_id": str(uuid4()),
+                "lease_id": lease,
+                "map_id": "mock_lab",
+                "pose": _pose(1.0, 0.6),
+            },
+            headers=headers,
+        )
+        assert rejected.status_code == 409
+        assert rejected.json()["error"]["code"] == "ROBOT_MOVING"

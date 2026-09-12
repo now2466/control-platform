@@ -4,6 +4,7 @@ import asyncio
 
 from pinky_control_center.map_service import MapService
 from pinky_control_center.models import ActiveSettings, Connection, FormationMode, RobotMode, RobotState
+from pinky_control_center.motion import STILL_ANGULAR_RPS, STILL_LINEAR_MPS, within_still_tolerance
 from pinky_control_center.state_store import StateStore
 from pinky_control_center.storage import Storage
 
@@ -37,8 +38,8 @@ class SettingsService:
     def _moving(robot: RobotState) -> bool:
         return (
             robot.mode in {RobotMode.AUTO, RobotMode.FOLLOW, RobotMode.MANUAL}
-            or (robot.linear_mps is not None and abs(robot.linear_mps) > 0.001)
-            or (robot.angular_rps is not None and abs(robot.angular_rps) > 0.001)
+            or (robot.linear_mps is not None and abs(robot.linear_mps) > STILL_LINEAR_MPS)
+            or (robot.angular_rps is not None and abs(robot.angular_rps) > STILL_ANGULAR_RPS)
         )
 
     def _can_change(self, changing_map: bool) -> bool:
@@ -86,7 +87,6 @@ class SettingsService:
             and robot.tf_valid
             and robot.mode in {RobotMode.IDLE, RobotMode.STOPPED}
             and robot.stop_latched is False
-            and robot.linear_mps is not None and abs(robot.linear_mps) <= 0.001
-            and robot.angular_rps is not None and abs(robot.angular_rps) <= 0.001
+            and within_still_tolerance(robot.linear_mps, robot.angular_rps)
             and snapshot.formation.state in {FormationMode.UNPAIRED, FormationMode.STOPPED}
         )

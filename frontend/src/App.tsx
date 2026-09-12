@@ -29,6 +29,10 @@ export function dashboardErrorMessage(message: string) {
     : message
 }
 
+export function isRobotStill(linearMps: number | null | undefined, angularRps: number | null | undefined) {
+  return linearMps != null && Math.abs(linearMps) <= 0.01 && angularRps != null && Math.abs(angularRps) <= 0.03
+}
+
 export default function App() {
   const [user, setUser] = useState<UserSession | null>(null)
   const [checking, setChecking] = useState(true)
@@ -54,7 +58,7 @@ export default function App() {
   if (!user) return <main><section className="login"><p className="eyebrow">PINKY PRO · CONTROL CENTER</p><h1>관제 로그인</h1><form onSubmit={(event: FormEvent) => { event.preventDefault(); setAuthError(''); login(credentials.username, credentials.password).then(setUser).catch(e => setAuthError(e.message)) }}><label>아이디<input autoComplete="username" value={credentials.username} onChange={e => setCredentials({ ...credentials, username: e.target.value })} required /></label><label>비밀번호<input type="password" autoComplete="current-password" value={credentials.password} onChange={e => setCredentials({ ...credentials, password: e.target.value })} required /></label><button type="submit">로그인</button></form>{authError && <div className="error">{authError}</div>}</section></main>
   const selected = state?.robots.find(robot => robot.robot_id === selectedRobot)
   const formationSafe = state?.formation?.state === 'UNPAIRED' || state?.formation?.state === 'STOPPED'
-  const still = selected?.linear_mps != null && Math.abs(selected.linear_mps) <= 0.001 && selected.angular_rps != null && Math.abs(selected.angular_rps) <= 0.001
+  const still = isRobotStill(selected?.linear_mps, selected?.angular_rps)
   const localizationBlockers = [
     !lease && '제어권이 없습니다.',
     !state?.map_id && '활성 지도가 없습니다.',

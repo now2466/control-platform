@@ -4,7 +4,7 @@
 
 이번 단계는 mock 운용 설정만 다룬다. 활성 정적 지도 선택, 추종 거리·허용 오차, 최대 선/각속도, 카메라 품질(`low`/`default`/`high`)을 SQLite의 단일 활성 설정으로 저장한다. `PUT /api/v1/settings`는 화면이 읽은 `version`을 비교해 갱신하며, 오래된 버전은 `409 SETTINGS_VERSION_CONFLICT`로 거절한다.
 
-관리자용 초기 위치는 선택한 로봇이 ONLINE·FRESH이고 IDLE/STOPPED, 속도 0, 정지 래치 해제, 편대 해제 상태일 때만 `POST /api/v1/robots/{robot_id}/initial-pose`로 접수한다. 현장 시험용 `POST /api/v1/robots/{robot_id}/localization-reset`은 operator lease를 요구하고, 로봇을 들어 옮긴 뒤 기존 map pose/TF가 stale 또는 unknown이어도 연결·정지·속도 0이면 활성 정적 지도의 자유 셀 pose를 `/initialpose`로만 전달한다. 같은 요청은 한 번만 adapter에 전달되며 두 API 모두 자동 주행을 시작하지 않는다. 설정 변경은 ADMIN 권한·Origin·CSRF 검증을 모두 요구하고, localization reset/navigation은 OPERATOR 이상 권한과 lease를 요구한다.
+관리자용 초기 위치는 선택한 로봇이 ONLINE·FRESH이고 IDLE/STOPPED, 정지 속도 허용오차 이내, 정지 래치 해제, 편대 해제 상태일 때만 `POST /api/v1/robots/{robot_id}/initial-pose`로 접수한다. 현장 시험용 `POST /api/v1/robots/{robot_id}/localization-reset`은 operator lease를 요구하고, 로봇을 들어 옮긴 뒤 기존 map pose/TF가 stale 또는 unknown이어도 연결·정지·정지 속도 허용오차 이내이면 활성 정적 지도의 자유 셀 pose를 `/initialpose`로만 전달한다. 허용오차는 실물 encoder 정지 잡음 측정치(약 ±0.0013 m/s, ±0.026 rad/s)를 포함하는 `|linear| ≤ 0.01 m/s`, `|angular| ≤ 0.03 rad/s`이며, 이를 넘으면 `ROBOT_MOVING`으로 거부한다. 같은 요청은 한 번만 adapter에 전달되며 두 API 모두 자동 주행을 시작하지 않는다. 설정 변경은 ADMIN 권한·Origin·CSRF 검증을 모두 요구하고, localization reset/navigation은 OPERATOR 이상 권한과 lease를 요구한다.
 
 SLAM 지도 생성/저장/리셋은 정적 `map_260905` 운용 범위에 포함하지 않는다. 로봇을 수동 재배치할 때는 지도 대신 AMCL pose를 재설정하며, Nav2 연결은 T15에서 별도 구현한다. LED·lamp·LCD/감정 장치, 역할 교환·로봇 등록 및 기타 실제 ROS 매핑은 실제 인터페이스 계약 확인 뒤 구현한다.
 
