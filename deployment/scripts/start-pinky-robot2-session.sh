@@ -50,7 +50,7 @@ wait_for_publisher() {
     if ! kill -0 "$pid" 2>/dev/null; then
       return 1
     fi
-    if ros2 topic info "$topic" 2>/dev/null | grep -Eq 'Publisher count: [1-9]'; then
+    if timeout 5s ros2 topic info "$topic" 2>/dev/null | grep -Eq 'Publisher count: [1-9]'; then
       return 0
     fi
     sleep 1
