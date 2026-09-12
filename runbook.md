@@ -107,7 +107,7 @@ ros2 launch pinky_gz_sim launch_sim.launch.xml namespace:=robot_1 world_name:=pi
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-python3 deployment/launch/control_center.launch.py
+/usr/bin/python3 deployment/launch/control_center.launch.py
 ```
 
 이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. compressed camera topic은 현재 raw camera 조사 결과만 있어 설정 후보가 미검증 상태이며, 실제 `CompressedImage` 발행 또는 변환 bridge를 확인하기 전에는 PASS로 기록하지 않는다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 다음 단계로 간다. control/follow 인터페이스, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
