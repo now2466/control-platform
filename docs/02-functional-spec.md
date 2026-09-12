@@ -22,7 +22,7 @@
 헤더는 고정한다. 본문 좌측 72%, 우측 28%; 지도 높이 기본 360px, 영상은 16:9. 작은 화면에서는 스크롤을 허용하며 지도 다음에 영상, 다음에 상세 패널을 배치한다. 화면에 맞추려고 지도를 읽기 어려울 만큼 축소하지 않는다.
 
 - 지도 로봇 클릭과 영상 카드 선택은 같은 선택 상태를 공유한다. 마스터 청색, 슬레이브 주황색이며 역할 텍스트를 함께 표시한다.
-- 지도 클릭으로 목표 위치, 드래그로 방향을 정하고 미리보기 후 `임무 시작`을 누른다. 슬레이브 선택 상태라도 편대 임무 목표의 대상이 마스터임을 명시한다.
+- 지도에서 `시작점 설정` 또는 `도착점 설정` 모드를 선택한 뒤 클릭/드래그로 위치와 방향을 정한다. 시작점은 선택 로봇의 초기 위치 후보로, 도착점은 임무 waypoint 미리보기로 사용하며 즉시 주행하지 않는다. `설정 초기화`는 두 후보와 입력값을 지운다. 슬레이브 선택 상태라도 편대 임무 목표의 대상이 마스터임을 명시한다.
 - 지도 셀 원점의 위치·회전을 적용해 world↔canvas 변환을 수행한다. 화면 y축 반전과 줌/팬의 역변환을 포함한다. 점유/미상 셀은 기본 목표 지정 불가, 로봇 footprint 통과 가능성은 Nav2 결과로 판정한다.
 - TF가 없으면 마지막 위치를 회색으로 남기고 경과 시간을 표시한다. TF 없는 두 위치로 상대 거리를 계산하지 않는다.
 - 영상은 로봇별 독립 로딩·재연결. 2초간 새 프레임이 없으면 영상 위 `영상 지연/끊김` 오버레이, 5초 후 마지막 영상을 가린다. 다른 로봇 영상으로 대체하지 않는다.
@@ -129,7 +129,7 @@ type Command = {
 | POST `/control-lease` | request_id | lease_id,expires_at; 충돌은 409 |
 | PATCH/DELETE `/control-lease/{id}` | request_id | 갱신/반납; 소유자만 |
 | GET `/robots` | 없음 | 로봇 설정·capabilities 목록 |
-| POST `/robots/{id}/initial-pose` | request_id,pose,covariance(36개) | 정지 상태에서 command |
+| POST `/robots/{id}/initial-pose` | request_id,pose | 정지·편대 해제·유효한 지도 TF 상태에서 command |
 | POST `/missions` | request_id,name,map_id,waypoints,repeat_count | DRAFT mission |
 | GET `/missions` | cursor,limit(최대100),state,from,to | items,next_cursor |
 | GET `/missions/{id}` | 없음 | Mission |
@@ -181,6 +181,8 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 | 신규 제어 | `{slave_ns}/follow/command` | 아래 FollowCommand service; 장기 완료는 status command_id로 상관 |
 | 신규 출력 | `{ns}/control/manual_velocity` | TwistStamped, 10Hz. 최종 cmd_vel에 직접 발행 금지 |
 | 신규 출력 | `{ns}/control/heartbeat` | std_msgs/UInt64, 10Hz 증가 counter; 수신 간격으로 watchdog 판단 |
+
+현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API는 `PoseWithCovarianceStamped`를 `{ns}/initialpose`에 발행하며 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 `TwistStamped`를 `{ns}/control/manual_velocity`에 발행하고 최종 `/cmd_vel`은 로봇 측 중재기가 담당한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·안전 중재기는 현장 gate에서 별도 확인한다.
 
 신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
 

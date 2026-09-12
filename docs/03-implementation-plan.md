@@ -114,6 +114,7 @@ class RobotAdapter(Protocol):
 - [x] 비영점·회전 origin, 줌/팬, canvas y반전의 좌표 왕복 테스트를 작성한다. 임의 점 world→screen→world 오차 1e-6m 이하.
 - [x] 두 위치·방향·궤적·목표·경로, 배터리·속도·모드·신선도 카드를 구현한다.
 - [x] TF 없는 로봇은 경고 표시, 거리 null 처리. 클릭 선택이 카드와 지도에서 일치하게 한다.
+- [x] 현장 SDF world 기반 `map_260905` 정적 지도, 시작점·도착점 선택 및 설정 초기화를 구현한다.
 
 검증: `cd frontend && npm run test` (13 tests), `cd backend && python -m pytest -q` (17 tests; map targeted 3 tests 포함). T04의 영상 그리드와 T06의 목표 명령·편대 제어는 이 단계에 포함하지 않는다.
 
@@ -206,10 +207,11 @@ SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환
 파일: ros/pinky_control_interfaces 전체, backend/pinky_control_center/adapters/ros.py, backend/config/robots.ros.yaml, backend/launch 파일, backend/tests/test_ros_mapping.py, docs/integration-report.md.
 
 - [ ] 로봇별 rosbridge websocket endpoint, 고정 ROS_DOMAIN_ID(`robot_1=12`, `robot_2=13`), topic/service/action 목록과 실제 타입·QoS, TF tree, 카메라, 속도 상한을 읽기 전용 조사한다. 결과를 docs/integration-report.md에 기록한다.
-- [ ] T12 예정 `backend/config/robots.ros.yaml`에 bridge endpoint/credentials/TLS/mapping과 고정 domain(`robot_1: 12`, `robot_2: 13`)을 기록하고 RobotAdapter를 두 개 구성해 rosbridge JSON 요청·feedback·결과를 연결한다. rosbridge 프로세스는 각 domain 환경으로 시작하며 관제 UI/API로 domain을 변경하지 않는다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
-- [ ] namespaced 토픽과 TF를 각기 검증한다. 기존 고정 odom/base_footprint는 로봇 담당과 수정·설정하고 TF 경로를 실측 확인한다.
+- [x] `backend/pinky_control_center/resources/config/robots.ros.yaml`에 bridge endpoint/credentials/TLS/mapping과 고정 domain(`robot_1: 12`, `robot_2: 13`)을 기록하고 RobotAdapter를 두 개 구성해 rosbridge JSON 요청·feedback·결과를 연결한다. rosbridge 프로세스는 각 domain 환경으로 시작하며 관제 UI/API로 domain을 변경하지 않는다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
+- [x] `/tf`·`/tf_static`과 odom을 수신해 map TF graph를 합성하고, 지도 pose·TF validity·궤적을 상태에 반영한다. 실제 namespaced topic과 `base_footprint` 경로 실측 검증은 남긴다.
+- [x] 정지 조건 뒤 초기 위치를 `{ns}/initialpose`로 발행하고 수동 입력을 `{ns}/control/manual_velocity`로 발행한다. 최종 cmd_vel은 직접 발행하지 않는다.
 - [ ] 로봇 담당이 control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog을 구현한 결과를 연결한다. 미제공 기능은 UNSUPPORTED를 유지한다.
-- [ ] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다.
+- [x] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다. 실제 토픽·FPS는 현장 검증이 남는다.
 - [ ] 무이동 상태에서 상태·영상·정지 응답을 먼저 시험한다. 현장 이동 시험 전에는 실물 속도 제어 enable을 열지 않는다.
 
 검증 (워크스페이스 `/home/yoon/pinky`):

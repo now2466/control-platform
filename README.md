@@ -46,11 +46,11 @@ mkdir -p ~/.local/state/control-platform
 | T09 | 설정·정적 지도·초기 위치 | 완료(mock, 축소 범위) |
 | T10 | 기록·검색 | 완료 — 30일 운용 이력, 조건 조회·JSON 내보내기 |
 | T11 | 영상 기록·동기 재생 | 범위 제외 |
-| T12 | ROS 2·실물 인터페이스 연동 | 부분 완료 — adapter/contract test; 실제 graph·TF·camera·stop은 NOT_RUN |
+| T12 | ROS 2·실물 인터페이스 연동 | 부분 완료 — rosbridge adapter, TF 합성, 초기 위치·수동 중재 토픽 contract test; 실제 graph·camera·stop은 NOT_RUN |
 | T13 | 인증 강화·배포 | 부분 완료 — TLS 동일 출처 proxy, single-worker service, env 검증, runbook |
 | T14 | 통합 인수·실물 검증 | 부분 완료 — mock acceptance smoke; Gazebo·실물 시험 NOT_RUN |
 
-T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T09는 versioned active settings, ADMIN 설정 화면, 정지 상태 초기 위치와 두 정적 지도 선택을 제공한다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 T12 이후 범위다.
+T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. 현재 `map_260905`는 현장 SDF world의 box geometry를 rasterize한 정적 지도이며, `시작점 설정`·`도착점 설정`·`설정 초기화`로 지도 위 후보를 관리한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T09는 versioned active settings, ADMIN 설정 화면, 정지 상태 초기 위치와 정적 지도 선택을 제공한다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 T12 현장 gate 범위다.
 
 설정 적용은 adapter와 SQLite의 활성값을 같은 프로세스에서 함께 갱신하므로 현재 서버는 단일 worker만 지원한다. CLI는 worker 1개로 실행되며 `CONTROL_PLATFORM_WORKERS=1` 이외의 선언은 시작 시 거절한다.
 
