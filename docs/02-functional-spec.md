@@ -133,6 +133,8 @@ type Command = {
 
 서버는 활성 지도·map frame·점유 상태·로봇 신선도·정지·편대/임무 상태·`navigate` capability를 확인한다. 시작점 또는 도착점이 점유/미상 셀이면 `MAP_POINT_BLOCKED`로 거부한다. 수락된 요청은 시작점 `/initialpose` → `AUTO` 모드 → 로봇 watchdog의 `NavigateToPose` action 요청 순서로 실행된다. Nav2 controller/recovery 출력은 `/control/nav_velocity`로만 들어가고 watchdog만 최종 `/cmd_vel`을 발행한다. `stop`은 Nav2 goal을 취소하며, 통신 복구나 정지 해제 후 자동 재개하지 않는다.
 
+관제 화면은 명령 거절·Nav2 실패·완료 시간 초과 같은 동작 오류를 backend 연결 장애와 구분해 표시한다. `fetch` 자체의 네트워크 실패일 때만 개발 구성의 backend/Vite proxy 확인 안내를 노출하며, 정상 HTTP 응답으로 전달된 오류에는 해당 안내를 덧붙이지 않는다.
+
 실물 Pinky의 목표 도달 판정은 지도 클릭 목표와 실제 정지 위치 사이의 평면 거리가 0.08m 이내이고 방향 오차가 0.17rad(약 10도) 이내일 때 성공으로 본다. 이는 0.25m 기본 허용오차로 인해 목표 약 0.22m 전에 성공 처리된 robot_2 현장 결과를 반영한 값이다. 최종 위치 오차는 현장 시험에서 기록하며, 허용오차를 줄인 뒤 진동·시간 초과가 발생하면 제어기와 감속 설정을 함께 재조정한다.
 
 AMCL이 `/initialpose`를 받은 뒤 `map→odom→base_footprint` TF를 발행하기까지는 수 초가 걸릴 수 있다. 정지 해제는 이 TF를 대신 만들지 않는다. robot_2 Nav2 session은 고정된 2초 타이머로 navigation lifecycle을 활성화하지 않고, 해당 TF가 확인될 때까지 lifecycle startup을 대기·재시도한다. TF가 확인되기 전에는 지도 주행 버튼을 비활성화하고, TF가 사라지거나 startup이 실패해도 goal을 전송하지 않는다.

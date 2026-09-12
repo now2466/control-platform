@@ -22,6 +22,13 @@ async function getState(): Promise<State> {
   return response.json() as Promise<State>
 }
 
+export function dashboardErrorMessage(message: string) {
+  const connectionFailure = /failed to fetch|networkerror|network request failed|load failed/i.test(message)
+  return connectionFailure
+    ? '관제 백엔드에 연결할 수 없습니다. 127.0.0.1:8081의 backend와 Vite proxy 상태를 확인해 주세요.'
+    : message
+}
+
 export default function App() {
   const [user, setUser] = useState<UserSession | null>(null)
   const [checking, setChecking] = useState(true)
@@ -76,7 +83,7 @@ export default function App() {
     <header><div><p className="eyebrow">PINKY PRO · CONTROL CENTER</p><h1>2대 로봇 관제</h1></div><div className="userbar"><span>{user.username} · {user.role}</span><button onClick={() => logout().finally(() => { setUser(null); setState(null); setLease(null); setLeaseError('') })}>로그아웃</button></div></header>
     <div className="session-status"><span className="pill online">권한 {user.role}</span><span className="pill">{socketStatus}</span>{lease ? <><span className="pill online">제어권 활성</span><button onClick={() => releaseLease(lease.lease_id).finally(() => setLease(null))}>제어권 반납</button></> : <button onClick={() => acquireLease().then(setLease).catch(e => setLeaseError(e.message))}>제어권 획득</button>}</div>
     {leaseError && <div className="error">{leaseError}</div>}
-    {error && <div className="error">{error}. 백엔드를 127.0.0.1:8081에서 실행해 주세요.</div>}
+    {error && <div className="error">{dashboardErrorMessage(error)}</div>}
     <MapPanel robots={state?.robots ?? []} selected={selectedRobot} mapId={state?.map_id} onSelect={setSelectedRobot} onGoalChange={setGoal} initialPose={initialPose} onInitialPoseChange={setInitialPose} onResetSelections={() => { setMapResetVersion(value => value + 1); setNavigationStatus('') }} onNavigate={runNavigation} navigationReady={navigationReady} navigationBusy={navigationBusy} onResetLocalization={runLocalizationReset} localizationReady={localizationReady} localizationBusy={localizationBusy} navigationStatus={navigationStatus} />
     <SettingsPage role={user.role} robots={state?.robots ?? []} selectedRobot={selectedRobot} initialPose={initialPose} poseResetVersion={mapResetVersion} onError={setError} onLoaded={value => setCameraQuality(value.camera_quality)} onSaved={value => { setGoal(null); setCameraQuality(value.camera_quality); setState(current => current ? { ...current, map_id: value.active_map_id } : current) }} />
     <AlertList alerts={state?.active_alerts ?? []} onError={setError} />
