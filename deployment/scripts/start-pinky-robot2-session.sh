@@ -45,12 +45,14 @@ wait_for_publisher() {
   local pid="$2"
   local timeout_seconds="${3:-30}"
   local attempt
+  local topic_info
 
   for ((attempt = 1; attempt <= timeout_seconds; attempt++)); do
     if ! kill -0 "$pid" 2>/dev/null; then
       return 1
     fi
-    if timeout 5s ros2 topic info "$topic" 2>/dev/null | grep -Eq 'Publisher count: [1-9]'; then
+    topic_info="$(timeout 5s ros2 topic info "$topic" 2>/dev/null || true)"
+    if grep -Eq 'Publisher count: [1-9]' <<<"$topic_info"; then
       return 0
     fi
     sleep 1
