@@ -16,14 +16,14 @@
 
 ## 지도 센서 레이어 실시간 계약
 
-상태 WS의 type에 map/path/scan/costmap을 추가한다. 레이어 payload는 공통 robot_id, frame_id, source_at, received_at을 포함한다.
+레이어 payload는 공통 robot_id, frame_id, source_at, received_at을 포함한다. 현재 실물 진단 화면은 인증된 `GET /api/v1/robots/{robot_id}/sensor-layers`를 선택 로봇에 대해서만 조회한다.
 
 - path: points 배열, 각 원소는 x,y(m).
 - scan: 공통 map 좌표로 변환한 points(x,y) 최대 2000개, 최대 5Hz.
 - costmap: resolution,width,height,origin,data(0~255 배열), 최대 1Hz.
 - map: map_id,version으로 지도 API 재조회를 유도한다.
 
-클라이언트는 `{type:"subscribe_layers",robot_id,layers:["path","scan","costmap"]}`로 선택 로봇의 레이어를 구독한다. 선택되지 않은 scan/costmap은 전송하지 않는다. TF 변환 실패 시 빈 레이어와 reason_code를 전달하고 기존 레이어를 지운다. T03/T08/T12에서 각 생산·표시·ROS 매핑을 구현한다.
+클라이언트는 Scan 레이어가 열려 있는 동안에만 최대 5Hz로 상세 API를 갱신하며, 선택되지 않은 로봇의 scan은 요청하지 않는다. 서버는 rosbridge에서 LaserScan을 최대 5Hz로 제한해 수신하고 map→laser frame TF로 각 유효 거리값을 map 좌표의 points로 변환한다. TF 변환 실패 시 빈 레이어와 reason_code를 전달하고 기존 레이어를 지운다. costmap 실시간 수신은 후속 범위다.
 
 ## 임무 시작 및 취소 완료
 

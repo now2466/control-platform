@@ -2,6 +2,8 @@
 
 범위는 mock 관측에서의 알림과 선택 로봇의 지도 센서 오버레이다. ROS `LaserScan`/`Costmap` 구독과 실제 필수 노드 graph 검증은 T12 범위다. mock은 `robot_1`의 Scan·local/global costmap만 최소 데이터로 표시하고, `robot_2`는 `UNSUPPORTED` 상태를 명시한다.
 
+T12 실물 연동 보완으로 rosbridge `/scan`을 최대 5Hz로 구독하고 LaserScan frame을 map frame으로 변환한 점을 지도 위에 표시한다. Scan 화면을 연 동안만 상세 API를 200ms 간격으로 갱신하며, 근거리 반사점 색상·최근접 거리·점 개수로 차체 반사와 벽 오인식을 현장에서 확인할 수 있게 한다.
+
 | 테스트 | RED 명령 및 실제 실패 이유 | GREEN 결과 |
 |---|---|---|
 | `backend/tests/test_alerts.py` | `cd backend && .venv/bin/python -m pytest tests/test_alerts.py -q` → `ModuleNotFoundError: pinky_control_center.alert_service` | 같은 명령 → 4 passed. 저/위험 배터리의 10초 지속·10초 해소, stale 배터리 미판정, ACTIVE ACK, 통신·TF·추종·센서·명령 거절 중복 억제와 follow LOST의 한 번뿐인 양쪽 보호 정지를 확인한다. |

@@ -5,7 +5,8 @@ import { canvasToWorld, centerViewOnWorld, isFreeOccupancyCell, MapInfo, staleAg
 type Point = { x: number; y: number }
 export type Goal = Point & { yaw: number; frame_id: string }
 type Robot = { robot_id: string; name: string; role: 'MASTER' | 'SLAVE'; pose?: { x: number; y: number; yaw: number } | null; pose_freshness?: string; trail?: Point[]; path?: Point[]; goal?: Goal | null; tf_valid?: boolean; tf_reason_code?: string | null; received_at?: string | null }
-type Scan = { state: 'OK' | 'STALE' | 'ERROR' | 'UNSUPPORTED'; rays: { angle_rad: number; range_m: number }[] }
+type ScanPoint = Point & { range_m: number }
+type Scan = { state: 'OK' | 'STALE' | 'ERROR' | 'UNSUPPORTED'; frame_id?: string; points?: ScanPoint[]; rays?: { angle_rad: number; range_m: number }[]; point_count?: number; min_range_m?: number | null; reason_code?: string | null; received_at?: string | null }
 type Costmap = { name: 'local_costmap' | 'global_costmap'; state: 'OK' | 'STALE' | 'ERROR' | 'UNSUPPORTED'; cells: { x: number; y: number; occupied: boolean }[] }
 type SensorLayers = { robot_id: string; scan: Scan; costmaps: Costmap[] }
 type Layer = 'map' | 'scan' | 'local_costmap' | 'global_costmap'
@@ -39,18 +40,22 @@ export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChan
   useEffect(() => {
     if (!selected) return
     let alive = true
+    let timer: ReturnType<typeof setTimeout> | undefined
     setSensorLayers(null); setSensorError('')
-    fetch(`/api/v1/robots/${selected}/sensor-layers`, { credentials: 'include' })
+    const refresh = () => fetch(`/api/v1/robots/${selected}/sensor-layers`, { credentials: 'include' })
       .then(response => response.ok ? response.json() as Promise<SensorLayers> : Promise.reject(new Error(`센서 상태 요청 실패 (${response.status})`)))
-      .then(value => { if (alive && value.robot_id === selected) setSensorLayers(value) })
+      .then(value => { if (alive && value.robot_id === selected) { setSensorLayers(value); setSensorError('') } })
       .catch(reason => alive && setSensorError(reason.message))
-    return () => { alive = false }
-  }, [selected])
+      .finally(() => { if (alive && layer === 'scan') timer = setTimeout(refresh, 200) })
+    void refresh()
+    return () => { alive = false; if (timer) clearTimeout(timer) }
+  }, [selected, layer])
 
   useEffect(() => { if (following && active?.pose && metadata) setView(centerViewOnWorld(active.pose, metadata, view.scale)) }, [following, selected, active?.pose?.x, active?.pose?.y, metadata])
 
   const imageHref = useMemo(() => metadata ? `${metadata.data_url}?version=${encodeURIComponent(metadata.version)}` : '', [metadata])
   const selectedLayers = sensorLayers?.robot_id === selected ? sensorLayers : null
+  const scanPoints = selectedLayers?.scan.points ?? (active?.pose ? (selectedLayers?.scan.rays ?? []).map(ray => ({ x: active.pose!.x + Math.cos(active.pose!.yaw + ray.angle_rad) * ray.range_m, y: active.pose!.y + Math.sin(active.pose!.yaw + ray.angle_rad) * ray.range_m, range_m: ray.range_m })) : [])
   const costmap = layer === 'scan' || layer === 'map' ? undefined : selectedLayers?.costmaps.find(item => item.name === layer)
   const layerState = layer === 'map' ? 'OK' : layer === 'scan' ? selectedLayers?.scan.state : costmap?.state
   const layerLabel = layer === 'map' ? '지도' : layer === 'scan' ? 'Scan' : layer === 'local_costmap' ? 'Local costmap' : 'Global costmap'
@@ -84,14 +89,15 @@ export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChan
     <svg viewBox={`0 0 ${map.width} ${map.height}`} className="map">
       {metadata ? <image href={imageHref} width={map.width} height={map.height} preserveAspectRatio="none" transform={`translate(${view.offsetX} ${view.offsetY}) scale(${view.scale})`} onLoad={loadOccupancy} /> : <rect width={map.width} height={map.height} fill="#18202b" />}
       {metadata && <rect className="map-input-layer" width={map.width} height={map.height} fill="transparent" pointerEvents="all" onPointerDown={onPointerDown} onClick={onClick} />}
-      {layer === 'scan' && active?.pose && selectedLayers?.scan.state === 'OK' && <g className="scan-layer">{selectedLayers.scan.rays.map((ray, index) => { const end = project({ x: active.pose!.x + Math.cos(active.pose!.yaw + ray.angle_rad) * ray.range_m, y: active.pose!.y + Math.sin(active.pose!.yaw + ray.angle_rad) * ray.range_m }), origin = project(active.pose!); return <line key={index} x1={origin.x} y1={origin.y} x2={end.x} y2={end.y} stroke="#62d7d1" strokeWidth=".7" /> })}</g>}
+      {layer === 'scan' && selectedLayers?.scan.state === 'OK' && <g className="scan-layer" pointerEvents="none">{scanPoints.map((hit, index) => { const point = project(hit); return <circle key={index} cx={point.x} cy={point.y} r={hit.range_m < .2 ? 2.2 : hit.range_m < .5 ? 1.7 : 1.25} fill={hit.range_m < .2 ? '#ff334f' : hit.range_m < .5 ? '#ffb020' : '#19d3c5'} stroke={hit.range_m < .2 ? '#7f0014' : 'none'} strokeWidth=".5" opacity=".9" /> })}</g>}
       {costmap?.state === 'OK' && <g className="costmap-layer">{costmap.cells.filter(cell => cell.occupied).map((cell, index) => { const point = project(cell); return <rect key={index} x={point.x - 2} y={point.y - 2} width="4" height="4" fill={layer === 'local_costmap' ? '#f87171' : '#c084fc'} opacity=".7" /> })}</g>}
       {robots.map(robot => robot.pose && <g key={robot.robot_id} onClick={event => { event.stopPropagation(); onSelect(robot.robot_id) }} className={selected === robot.robot_id ? 'selected-robot' : ''}>{robot.trail?.length ? <polyline points={robot.trail.map(point => { const q = project(point); return `${q.x},${q.y}` }).join(' ')} fill="none" stroke="#60718a" strokeWidth="1" /> : null}{robot.path?.length ? <polyline points={robot.path.map(point => { const q = project(point); return `${q.x},${q.y}` }).join(' ')} fill="none" stroke="#f0b35b" strokeDasharray="2 2" strokeWidth="1" /> : null}{robot.goal ? <circle cx={project(robot.goal).x} cy={project(robot.goal).y} r="4" fill="none" stroke="#f0b35b" /> : null}{(() => { const point = project(robot.pose!); const stale = robot.pose_freshness !== 'FRESH' || !robot.tf_valid; return <><circle cx={point.x} cy={point.y} r="4" fill={stale ? '#89919f' : robot.role === 'MASTER' ? '#3182ce' : '#ed8936'} /><line x1={point.x} y1={point.y} x2={point.x + Math.cos(worldYawToCanvas(robot.pose!.yaw, map)) * 9} y2={point.y + Math.sin(worldYawToCanvas(robot.pose!.yaw, map)) * 9} stroke="white" strokeWidth="1.5" /><text x={point.x + 5} y={point.y - 5} fill="white" fontSize="5">{robot.name}{stale ? ` · 위치 지연 ${staleAgeLabel(robot.received_at)}` : ''}</text></> })()}</g>)}
       {initialPose && <g className="initial-pose-marker"><circle cx={project(initialPose).x} cy={project(initialPose).y} r="5" fill="none" stroke="#9de5bc" strokeWidth="1.5" /><line x1={project(initialPose).x} y1={project(initialPose).y} x2={project(initialPose).x + Math.cos(worldYawToCanvas(initialPose.yaw, map)) * 13} y2={project(initialPose).y + Math.sin(worldYawToCanvas(initialPose.yaw, map)) * 13} stroke="#9de5bc" strokeWidth="2" /><text x={project(initialPose).x + 6} y={project(initialPose).y + 5} fill="#9de5bc" fontSize="5">시작점</text></g>}
       {preview && <g className="goal-preview"><circle cx={project(preview).x} cy={project(preview).y} r="5" fill="#ff8a3d" fillOpacity=".25" stroke="#ff5a36" strokeWidth="2" /><line x1={project(preview).x} y1={project(preview).y} x2={project(preview).x + Math.cos(worldYawToCanvas(preview.yaw, map)) * 12} y2={project(preview).y + Math.sin(worldYawToCanvas(preview.yaw, map)) * 12} stroke="#ff5a36" strokeWidth="2.5" /><text x={project(preview).x + 6} y={project(preview).y + 5} fill="#d9362b" stroke="white" strokeWidth=".5" paintOrder="stroke" fontSize="5">도착점</text></g>}
     </svg>
     {cellError && <p className="map-warning">{cellError}</p>}{sensorError && <p className="map-warning">센서 상세: {sensorError}</p>}
-    {layer !== 'map' && <p className="map-note">{layerLabel} · {layerState === 'UNSUPPORTED' ? '지원하지 않음' : layerState === 'STALE' ? '데이터 지연' : layerState === 'ERROR' ? '오류' : layerState === 'OK' ? 'OK' : '상태 확인 중'}</p>}
+    {layer !== 'map' && <p className="map-note">{layerLabel} · {layerState === 'UNSUPPORTED' ? '지원하지 않음' : layerState === 'STALE' ? '데이터 지연' : layerState === 'ERROR' ? `오류 (${selectedLayers?.scan.reason_code ?? '원인 확인 필요'})` : layerState === 'OK' ? 'OK' : '상태 확인 중'}{layer === 'scan' && layerState === 'OK' ? ` · 점 ${selectedLayers?.scan.point_count ?? scanPoints.length}개 · 최근접 ${selectedLayers?.scan.min_range_m?.toFixed(3) ?? '-'} m · 5Hz 갱신` : ''}</p>}
+    {layer === 'scan' && <p className="map-note">Scan 색상: <span className="scan-near">빨강 0.2m 미만</span> · <span className="scan-mid">주황 0.5m 미만</span> · 청록 그 이상</p>}
     {robots.some(robot => !robot.tf_valid) && <p className="map-warning">TF 변환을 확인할 수 없어 편대 거리·방위각을 표시하지 않습니다.</p>}
     {!localizationReady && localizationBlockers.length > 0 && <p className="map-warning">위치 재설정 불가: {localizationBlockers.join(' ')}</p>}
     {!canNavigate && navigationReasons.length > 0 && <p className="map-warning">이동 불가: {navigationReasons.join(' ')}</p>}

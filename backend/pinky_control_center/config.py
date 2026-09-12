@@ -54,6 +54,7 @@ class RosbridgeTopics(BaseModel):
     battery_voltage: str = Field(pattern=r"^/")
     camera_compressed: str = Field(pattern=r"^/")
     control_status: str = Field(pattern=r"^/")
+    scan: str = Field(default="/scan", pattern=r"^/")
     path: str | None = Field(default=None, pattern=r"^/")
     manual_velocity: str | None = Field(default=None, pattern=r"^/")
     initial_pose: str | None = Field(default=None, pattern=r"^/")

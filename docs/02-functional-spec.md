@@ -213,6 +213,8 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API와 지도 주행은 설정한 initial pose 토픽(실물 Pinky는 `/initialpose`)에 stamp 0의 `PoseWithCovarianceStamped`를 발행해 최신 TF를 사용한다. 지도 주행 실행기는 start pose를 먼저 발행하고 `AUTO` 모드와 `navigate` ControlCommand를 순서대로 요청한다. 실물 robot_2의 watchdog는 이 명령을 `/navigate_to_pose` action으로 연결하며 Nav2 출력은 `/control/nav_velocity`로 받고 최종 `/cmd_vel`을 단독 발행한다. 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 설정한 중재 토픽(실물 Pinky는 `/control/manual_velocity`)에 `TwistStamped`를 발행한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·AMCL 초기화·Nav2 action·안전 중재기는 현장 gate에서 별도 확인한다.
 
+실물 진단용 Scan 오버레이는 로봇별 rosbridge의 `/scan`을 200ms throttle로 구독한다. 서버는 LaserScan의 frame에서 `map`까지 TF를 합성해 최대 2000개 유효 반사점을 map 좌표로 변환하고, Scan 레이어를 선택한 브라우저가 센서 상세 API를 최대 5Hz로 갱신한다. 0.2m 미만은 빨강, 0.5m 미만은 주황, 그 이상은 청록으로 표시하며 최근접 거리와 점 개수를 함께 보여준다. Scan 지연 또는 map TF 부재 시 과거 점을 재사용하지 않고 빈 레이어와 reason code를 표시한다.
+
 신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
 
 ```text

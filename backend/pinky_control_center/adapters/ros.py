@@ -39,6 +39,8 @@ _MAX_FRAGMENT_BYTES = 4 * 1024 * 1024
 _FRAGMENT_TTL_SECONDS = 5.0
 _MAX_FRAGMENT_IDS = 16
 _CAMERA_STALE_SECONDS = 2.0
+_SCAN_STALE_SECONDS = 1.0
+_MAX_SCAN_POINTS = 2000
 
 
 @dataclass
@@ -102,6 +104,8 @@ class RosbridgeAdapter:
         self._pose_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
         self._battery_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
         self._camera_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
+        self._scan_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
+        self._scans: dict[RobotId, dict[str, object] | None] = {"robot_1": None, "robot_2": None}
         self._transforms: dict[RobotId, dict[tuple[str, str], _Transform2D]] = {"robot_1": {}, "robot_2": {}}
         self._odom_frames: dict[RobotId, tuple[str, str] | None] = {"robot_1": None, "robot_2": None}
 
@@ -209,6 +213,7 @@ class RosbridgeAdapter:
             (topics.camera_compressed, "sensor_msgs/msg/CompressedImage", robot.camera.throttle_rate_ms),
             (topics.tf, "tf2_msgs/msg/TFMessage", 0),
             (topics.tf_static, "tf2_msgs/msg/TFMessage", 0),
+            (topics.scan, "sensor_msgs/msg/LaserScan", 200),
         )
         for topic, message_type, throttle_rate in subscriptions:
             payload: dict[str, object] = {"op": "subscribe", "topic": topic, "queue_length": 1}
@@ -234,6 +239,8 @@ class RosbridgeAdapter:
         self._pose_received_at[robot_id] = None
         self._battery_received_at[robot_id] = None
         self._camera_received_at[robot_id] = None
+        self._scan_received_at[robot_id] = None
+        self._scans[robot_id] = None
         self._transforms[robot_id].clear()
         self._odom_frames[robot_id] = None
         current = self._states[robot_id]
@@ -371,6 +378,12 @@ class RosbridgeAdapter:
                 "path": [MapPoint.model_validate(point) for point in payload["points"]],
             })
             await self._emit("path", robot_id, payload, now)
+        elif topic == robot.topics.scan:
+            self._scans[robot_id] = message
+            self._scan_received_at[robot_id] = now
+            self._states[robot_id] = self._states[robot_id].model_copy(update={
+                "connection": Connection.ONLINE, "received_at": now,
+            })
 
     def _update_odom(self, robot_id: RobotId, message: dict[str, object], now: datetime) -> None:
         pose_part = _nested_dict(message, "pose", "pose")
@@ -531,18 +544,66 @@ class RosbridgeAdapter:
         return self._frames.get(robot_id)
 
     def sensor_layers(self, robot_id: str) -> dict[str, object]:
-        """Do not turn an unimplemented ROS overlay into an API 500."""
+        """Return bounded sensor overlays, with LaserScan points in map coordinates."""
         if robot_id not in self._by_id:
             raise ValueError("unknown robot")
         state = self._states[robot_id]
+        scan = self._scan_layer(robot_id)
         unavailable = "STALE" if state.connection is not Connection.ONLINE else "UNSUPPORTED"
         return {
             "robot_id": robot_id,
-            "scan": {"state": unavailable, "rays": []},
+            "scan": scan,
             "costmaps": [
                 {"name": "local_costmap", "state": unavailable, "cells": []},
                 {"name": "global_costmap", "state": unavailable, "cells": []},
             ],
+        }
+
+    def _scan_layer(self, robot_id: RobotId) -> dict[str, object]:
+        received_at = self._scan_received_at[robot_id]
+        message = self._scans[robot_id]
+        base = {
+            "frame_id": "map", "points": [],
+            "source_at": None,
+            "received_at": received_at.isoformat() if received_at else None,
+        }
+        if message is None or received_at is None:
+            return {**base, "state": "STALE", "reason_code": "SCAN_UNAVAILABLE"}
+        if _freshness(received_at, self._clock(), _SCAN_STALE_SECONDS) is not Freshness.FRESH:
+            return {**base, "state": "STALE", "reason_code": "SCAN_STALE"}
+
+        laser_frame = _frame_id(message, "")
+        map_to_laser = _lookup_transform(self._transforms[robot_id], "map", laser_frame) if laser_frame else None
+        if map_to_laser is None:
+            return {**base, "state": "ERROR", "reason_code": "SCAN_MAP_TF_UNAVAILABLE"}
+
+        ranges = message.get("ranges")
+        angle_min = _number(message.get("angle_min"))
+        angle_increment = _number(message.get("angle_increment"))
+        range_min = _number(message.get("range_min"))
+        range_max = _number(message.get("range_max"))
+        if not isinstance(ranges, list) or angle_min is None or angle_increment is None:
+            return {**base, "state": "ERROR", "reason_code": "SCAN_INVALID"}
+
+        stride = max(1, math.ceil(len(ranges) / _MAX_SCAN_POINTS))
+        points: list[dict[str, float]] = []
+        minimum: float | None = None
+        for index in range(0, len(ranges), stride):
+            distance = _number(ranges[index])
+            if distance is None or (range_min is not None and distance < range_min) or (range_max is not None and distance > range_max):
+                continue
+            angle = map_to_laser.yaw + angle_min + index * angle_increment
+            points.append({
+                "x": map_to_laser.x + math.cos(angle) * distance,
+                "y": map_to_laser.y + math.sin(angle) * distance,
+                "range_m": distance,
+            })
+            minimum = distance if minimum is None else min(minimum, distance)
+        stamp = _ros_stamp(_nested_dict(message, "header", "stamp"))
+        return {
+            **base, "state": "OK", "reason_code": None, "points": points,
+            "source_at": stamp.isoformat() if stamp else None,
+            "point_count": len(points), "min_range_m": minimum,
         }
 
     def drain_events(self) -> list[AdapterEvent]:

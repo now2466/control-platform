@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import ssl
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -139,6 +140,35 @@ def test_rosbridge_composes_map_tf_with_odom_and_exposes_map_pose() -> None:
     asyncio.run(exercise())
 
 
+def test_rosbridge_projects_laserscan_into_map_and_expires_old_points() -> None:
+    async def exercise() -> None:
+        now = [datetime(2026, 1, 1, tzinfo=UTC)]
+        adapter = RosbridgeAdapter(load_ros_config(), clock=lambda: now[0])
+        adapter._mark_connected("robot_2")
+        await adapter.handle_publish("robot_2", "/tf_static", {"transforms": [{
+            "header": {"frame_id": "map"}, "child_frame_id": "laser",
+            "transform": {"translation": {"x": 1.0, "y": 2.0}, "rotation": {"x": 0, "y": 0, "z": 0, "w": 1}},
+        }]})
+        await adapter.handle_publish("robot_2", "/scan", {
+            "header": {"frame_id": "laser", "stamp": {"sec": 1_767_225_600, "nanosec": 0}},
+            "angle_min": 0.0, "angle_increment": math.pi / 2,
+            "range_min": 0.05, "range_max": 8.0,
+            "ranges": [0.1, 1.0, None, 9.0],
+        })
+        scan = adapter.sensor_layers("robot_2")["scan"]
+        assert scan["state"] == "OK" and scan["frame_id"] == "map"
+        assert scan["point_count"] == 2 and scan["min_range_m"] == pytest.approx(0.1)
+        assert scan["points"][0] == pytest.approx({"x": 1.1, "y": 2.0, "range_m": 0.1})
+        assert scan["points"][1] == pytest.approx({"x": 1.0, "y": 3.0, "range_m": 1.0})
+
+        now[0] += timedelta(seconds=2)
+        stale = adapter.sensor_layers("robot_2")["scan"]
+        assert stale["state"] == "STALE" and stale["points"] == []
+        assert stale["reason_code"] == "SCAN_STALE"
+
+    asyncio.run(exercise())
+
+
 def test_rosbridge_publishes_initial_pose_and_manual_velocity_to_mediator_topics() -> None:
     async def exercise() -> None:
         sockets = {"ws://robot-1.local:9090": FakeSocket(), "ws://robot-2.local:9091": FakeSocket()}
@@ -191,15 +221,16 @@ def test_rosbridge_reassembles_bounded_camera_fragments_and_drops_invalid_sets()
     asyncio.run(exercise())
 
 
-def test_ros_sensor_layers_are_explicit_when_unavailable_or_transport_is_offline() -> None:
+def test_ros_sensor_layers_are_stale_until_the_first_scan_arrives() -> None:
     adapter = RosbridgeAdapter(load_ros_config())
     available = adapter.sensor_layers("robot_1")
     assert available["scan"]["state"] == "STALE"
     assert {item["state"] for item in available["costmaps"]} == {"STALE"}
     adapter._mark_connected("robot_1")
-    unsupported = adapter.sensor_layers("robot_1")
-    assert unsupported["scan"]["state"] == "UNSUPPORTED"
-    assert {item["state"] for item in unsupported["costmaps"]} == {"UNSUPPORTED"}
+    waiting = adapter.sensor_layers("robot_1")
+    assert waiting["scan"]["state"] == "STALE"
+    assert waiting["scan"]["reason_code"] == "SCAN_UNAVAILABLE"
+    assert {item["state"] for item in waiting["costmaps"]} == {"UNSUPPORTED"}
 
 
 def test_battery_updates_do_not_refresh_an_old_pose() -> None:

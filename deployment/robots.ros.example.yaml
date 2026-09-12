@@ -15,6 +15,7 @@ robots:
       battery_voltage: /battery/voltage
       camera_compressed: /camera/image_raw/compressed
       control_status: /control/status
+      scan: /scan
       path: /plan
       manual_velocity: /control/manual_velocity
       initial_pose: /initialpose
@@ -39,6 +40,7 @@ robots:
       battery_voltage: /battery/voltage
       camera_compressed: /camera/image_raw/compressed
       control_status: /control/status
+      scan: /scan
       path: /plan
       manual_velocity: /control/manual_velocity
       initial_pose: /initialpose
