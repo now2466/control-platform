@@ -40,7 +40,7 @@ deployment/scripts/acceptance.sh
 | robot_2 control/watchdog/navigation 패키지 build | PASS | 2026-09-12 `/home/pinky/dev_ws/wj`에서 3개 패키지 `colcon build` 통과 |
 | `/navigate_to_pose` action·AMCL lifecycle·정적 map server | PASS | 2026-09-12 action server 1개, AMCL/map/planner/controller active 및 마지막 goal status 4 `SUCCEEDED` 확인 |
 | `map→odom→base_footprint` 및 라이다 costmap 반영 | PARTIAL | 갱신되는 TF와 `/scan` publisher 1개·약 10Hz 확인. 실제 장애물 costmap 반영은 미확인 |
-| 지도 시작점→AMCL→AUTO→목표 저속 주행 | PARTIAL | 실제 이동과 action 성공 확인. 0.25m 허용오차로 0.22m 조기 성공하여 0.08m/0.17rad로 조정, 반복 정밀도 시험 필요 |
+| 지도 시작점→AMCL→AUTO→목표 저속 주행 | PARTIAL | 실제 이동과 action 성공 확인. 0.25m 허용오차로 0.22m 조기 성공하여 0.08m/0.17rad로 조정. 두 번째 주행은 무관한 로그인 세션 만료가 잘못 발생시킨 안전정지로 취소되어 backend 회귀 테스트를 추가했으며 반복 정밀도 시험 필요 |
 | Gazebo 무이동 상태→개별/전체 정지 | NOT_RUN | rosbag/로그, command 결과 |
 | 두 Gazebo 인스턴스 spawn 위치 분리 | NOT_RUN | x/y spawn 인자를 지원하는 별도 world 또는 launch 수정. 현재 기본 위치 중첩 가능 |
 | 1시간 지도+영상 RSS/큐/N01~N03 | NOT_RUN | 측정값, 호스트 사양, 시계 동기 상태 |

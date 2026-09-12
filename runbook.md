@@ -120,6 +120,8 @@ source /opt/ros/jazzy/setup.bash
 
 현장 클릭 목표의 Nav2 도달 허용오차는 평면 0.08m, 방향 0.17rad(약 10도)다. 변경 전 0.25m 설정에서는 목표 약 0.22m 전에 정상 성공 처리된 사례가 있으므로, 시험 기록에는 클릭 목표와 최종 `map→base_footprint` pose의 거리·방향 오차를 함께 남긴다.
 
+주행 중 사용자 조작 없이 action이 `CANCELED`되고 history에 `SAFETY_STOP`이 남으면 같은 시각의 lease/session 만료를 확인한다. 현재 구현은 활성 제어 lease 자체가 만료되거나 그 lease를 소유한 로그인 세션이 만료될 때만 보호 정지하며, 제어권과 무관한 과거 로그인 세션 정리는 주행을 취소하지 않는다.
+
 ### 6.1 로봇 측 패키지 설치·빌드
 
 로봇의 기존 bringup/session 프로세스를 확인한 뒤, 소스 패키지를 명시된 workspace에 복사한다. 기존 bringup은 유지할 수 있지만, 이전에 별도로 실행한 camera publisher·image republisher·rosbridge·watchdog는 session script와 중복되지 않게 종료한다.

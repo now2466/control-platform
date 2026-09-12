@@ -33,6 +33,8 @@ mock API/UI와 launch/package syntax, robot_2의 세 패키지 build는 검증�
 
 robot_2 1차 현장 주행에서 `/scan` 약 10Hz, AMCL·Nav2 lifecycle active, `map→odom→base_footprint` TF, `/navigate_to_pose` action acceptance와 실제 이동을 확인했다. 마지막 action은 `SUCCEEDED`였지만 목표 `(1.20, -0.04)` 대비 정지 pose가 약 `(1.20, 0.18)`로 0.22m 일찍 멈췄다. 이는 `general_goal_checker.xy_goal_tolerance=0.25` 안에 들어온 정상 판정이므로 현장 클릭 주행 설정을 `xy_goal_tolerance=0.08`, `yaw_goal_tolerance=0.17`로 강화했다. 조정값의 반복 도착 정밀도와 장애물 회피는 아직 현장 gate다.
 
+두 번째 현장 주행은 목표 `(1.21, -0.18)`로 이동 중 pose 약 `(1.20, -0.05)`에서 action status 5 `CANCELED`로 종료됐다. 같은 시각 backend history에는 사용자 명령 없이 pair-wide `SAFETY_STOP`이 기록됐다. 원인은 `expire_security()`가 제어 lease를 소유하지 않은 과거 로그인 세션 만료까지 제어권 상실로 반환한 것이며, 이제 로그인 세션 만료는 해당 세션 소유의 활성 lease를 제거한 경우에만 보호 정지를 발생시킨다.
+
 허용오차 변경 배포 시 `/home/pinky/dev_ws/wj`의 전체 `rosdep install --from-paths src -y --ignore-src`는 기존 `lcd_control`·`pinky_web`의 사내 패키지 키와 두 제어 패키지의 `ament_python` rosdep 키를 해석하지 못해 실패했다. 새 의존성이 없는 YAML 변경이므로 `colcon build --packages-select pinky_control_navigation`으로 대상 패키지 빌드를 완료했으며, rosdep 선언 정리는 별도 유지보수 항목이다.
 
 ## 실행하지 않은 현장 검증

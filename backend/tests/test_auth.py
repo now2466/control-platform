@@ -87,3 +87,39 @@ def test_logout_releases_only_its_session_lease_and_records_safety_hook(tmp_path
         assert client.delete("/api/v1/session", headers={"origin": ORIGIN, "x-csrf-token": csrf}).status_code == 204
         assert app.state.lease_events == ["SESSION_LOGOUT"]
         assert client.get("/api/v1/session").status_code == 401
+
+
+def test_unrelated_expired_login_session_does_not_end_active_control_lease(tmp_path: Path) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    storage = Storage(tmp_path / "control.db", clock=lambda: now)
+    operator = storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+    stale_user = storage.create_or_reset_user("stale", "stale-password", UserRole.VIEWER)
+    active_token, _ = storage.create_session(operator)
+    stale_token, _ = storage.create_session(stale_user)
+    lease = storage.acquire_lease(operator, uuid4(), active_token)
+    with storage.connection:
+        storage.connection.execute(
+            "UPDATE sessions SET expires_at=? WHERE token_hash=?",
+            ((now - timedelta(seconds=1)).isoformat(), storage.token_hash(stale_token)),
+        )
+
+    assert storage.expire_security() == []
+    assert storage.owns_lease(lease.lease_id, operator, active_token)
+    storage.close()
+
+
+def test_expired_session_that_owns_control_lease_reports_control_loss(tmp_path: Path) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    storage = Storage(tmp_path / "control.db", clock=lambda: now)
+    operator = storage.create_or_reset_user("operator", "operator-password", UserRole.OPERATOR)
+    token, _ = storage.create_session(operator)
+    lease = storage.acquire_lease(operator, uuid4(), token)
+    with storage.connection:
+        storage.connection.execute(
+            "UPDATE sessions SET expires_at=? WHERE token_hash=?",
+            ((now - timedelta(seconds=1)).isoformat(), storage.token_hash(token)),
+        )
+
+    assert storage.expire_security() == ["SESSION_EXPIRED"]
+    assert not storage.owns_lease(lease.lease_id, operator, token)
+    storage.close()

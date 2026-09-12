@@ -419,15 +419,29 @@ class Storage:
         return bool(row and row["user_id"] == str(user.user_id) and row["session_token_hash"] == self.token_hash(session_token) and _parse_timestamp(row["expires_at"]) > self.clock())
 
     def expire_security(self) -> list[str]:
-        """Remove elapsed leases/sessions and report causes once to the runtime watchdog."""
+        """Remove elapsed security rows and report only losses of control authority.
+
+        An expired login session that never owned the control lease is ordinary
+        authentication cleanup.  It must not stop a robot controlled by another,
+        still-valid session.
+        """
         now = _timestamp(self.clock())
         with self._command_lock, self.connection:
             expired_leases = self.connection.execute("DELETE FROM control_leases WHERE expires_at <= ?", (now,)).rowcount
-            expired_sessions = self.connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,)).rowcount
+            expired_session_rows = self.connection.execute("SELECT token_hash FROM sessions WHERE expires_at <= ?", (now,)).fetchall()
+            expired_session_hashes = [row["token_hash"] for row in expired_session_rows]
+            session_owned_leases = 0
+            if expired_session_hashes:
+                placeholders = ",".join("?" for _ in expired_session_hashes)
+                session_owned_leases = self.connection.execute(
+                    f"DELETE FROM control_leases WHERE session_token_hash IN ({placeholders})",
+                    expired_session_hashes,
+                ).rowcount
+            self.connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
         reasons: list[str] = []
         if expired_leases:
             reasons.append("LEASE_EXPIRED")
-        if expired_sessions:
+        if session_owned_leases:
             reasons.append("SESSION_EXPIRED")
         return reasons
 
