@@ -88,6 +88,14 @@ sudo systemctl start pinky-control-center
 
 T12 ROS 어댑터가 설치된 별도 workspace에서만 수행한다. `/etc/pinky-control-center/robots.ros.yaml`의 실제 주소·매핑을 먼저 확인하고, bridge 두 개는 서로 다른 domain과 포트를 사용한다. `pinky-control-center.service`는 API만 관리하며 rosbridge launch의 lifecycle은 별도 ROS supervisor/operator가 관리한다.
 
+관제 PC에 rosbridge가 없다면 먼저 ROS 2 Jazzy 패키지를 설치한다. 설치 후 `ros2 pkg prefix rosbridge_server`가 경로를 출력해야 한다.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+sudo apt-get install -y ros-jazzy-rosbridge-server
+ros2 pkg prefix rosbridge_server
+```
+
 ```bash
 source /opt/ros/jazzy/setup.bash
 export ROS_DOMAIN_ID=12
