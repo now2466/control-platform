@@ -118,11 +118,12 @@ async def teleop(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     last_seq = -1
+    active_robot_id = "robot_1"
     while True:
         try:
             payload = await websocket.receive_json()
         except WebSocketDisconnect:
-            await websocket.app.state.protective_stop("robot_1")
+            await websocket.app.state.protective_stop(active_robot_id)
             return
         try:
             lease_id = UUID(str(payload["lease_id"]))
@@ -142,6 +143,7 @@ async def teleop(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"})
         else:
             last_seq = seq
+            active_robot_id = robot_id
             service = websocket.app.state.teleop_service
             try:
                 service.enter(robot_id, lease_valid=True)

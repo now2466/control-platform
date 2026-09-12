@@ -1,6 +1,6 @@
 # Pinky Pro 관제 플랫폼 사용자 가이드
 
-이 문서는 현재 구현된 관제 플랫폼을 실행하고 사용하는 방법을 설명한다. 전체 기능을 확인하려면 먼저 mock 모드로 실행한다. ROS 모드는 두 rosbridge 연결과 상태 수신 adapter를 제공하지만, 실제 목표 주행에는 로봇 측 control/follow 계약과 Nav2, TF, 카메라 변환 연결이 추가로 필요하다.
+이 문서는 현재 구현된 관제 플랫폼을 실행하고 사용하는 방법을 설명한다. 전체 기능을 확인하려면 먼저 mock 모드로 실행한다. ROS 모드는 두 rosbridge 연결과 상태 수신 adapter를 제공하며, robot_2에는 안전 수동 주행용 control watchdog를 별도로 설치할 수 있다. 목표 주행은 Nav2, 정적 점유 지도, AMCL/TF 검증이 끝난 뒤 진행한다.
 
 ## 1. 처음 실행하기
 
@@ -169,7 +169,7 @@ ADMIN은 다음 값을 변경할 수 있다.
 
 초기 위치는 먼저 로봇 카드나 지도에서 대상을 선택하고, 지도에서 `시작점 설정`으로 후보를 찍은 뒤 X, Y, Yaw를 확인하고 `초기 위치 적용`을 누른다. 로봇이 정지하고 편대가 해제되며 지도 TF가 유효한 상태에서만 적용한다.
 
-ROS 모드에서는 배포 설정에 지정된 초기 위치·수동 입력 토픽으로 전달된다. 실물 Pinky 매핑은 `/initialpose`와 `/control/manual_velocity`이며, 시뮬레이터처럼 namespace가 필요한 환경은 설정 파일에서 별도로 지정한다. 로봇 측 control/follow 계약, 최종 cmd_vel 중재기, 정지 래치·watchdog가 준비되기 전에는 주행 제어를 열지 않는다.
+ROS 모드에서는 배포 설정에 지정된 초기 위치·수동 입력 토픽으로 전달된다. 실물 Pinky 매핑은 `/initialpose`와 `/control/manual_velocity`이며, 시뮬레이터처럼 namespace가 필요한 환경은 설정 파일에서 별도로 지정한다. robot_2 session script는 `pinky_control_watchdog`를 함께 시작해 `/control/manual_velocity`를 제한·감시한 뒤 `/cmd_vel`로 전달한다. 시작 직후에는 정지 래치가 걸리므로 제어권 획득 → 선택 로봇의 `robot_2 정지 해제` → `MANUAL 모드 전환` 순서로 준비한다. `정지 해제`는 자동 주행을 재개하지 않는다.
 
 ## 10. 경고와 운용 이력
 
@@ -188,11 +188,11 @@ ROS 모드에서는 배포 설정에 지정된 초기 위치·수동 입력 토�
 
 수동 조작은 선택한 로봇에 적용된다. 제어권과 로봇의 `MANUAL` 모드가 모두 필요하다.
 
-- `전진` 또는 `좌회전` 버튼을 누르는 동안 10 Hz로 명령을 보낸다.
+- `MANUAL 모드 전환`을 누른 뒤 `전진` 또는 `좌회전` 버튼을 누르는 동안 10 Hz로 명령을 보낸다.
 - 버튼을 놓거나 포인터가 버튼 밖으로 나가면 0 속도를 보낸다.
 - 탭 전환, 브라우저 비활성화, 연결 종료 시 정지한다.
 
-현재 UI에는 로봇을 `MANUAL` 모드로 전환하는 기능이 없다. mock 기본 상태에서는 버튼이 비활성화되며, 실제 사용에는 로봇 측 control mediator와 모드 전환 계약이 필요하다.
+robot_2의 watchdog는 입력이 0.35초 이상 끊기면 `/cmd_vel`에 0을 발행한다. 그래도 실제 시험에서는 긴급 정지 버튼과 로봇 전원 차단 수단을 준비한다. 실물 control interface가 설치되지 않은 환경에서는 모드 전환과 명령이 거절되거나 `UNSUPPORTED`로 표시된다.
 
 ## 12. 현재 가능한 시험과 ROS 제한
 
@@ -213,7 +213,7 @@ Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결
 
 - 겹치지 않는 위치에 두 로봇을 생성하는 dual-robot launch
 - domain 12/13 각각의 `ros_gz_bridge`와 rosbridge
-- 로봇별 Nav2 또는 관제용 control mediator
+- 로봇별 Nav2와 관제용 control mediator
 - 슬레이브 follow controller와 정지 latch/watchdog
 - raw 카메라의 `CompressedImage` 변환
 - `map → robot_N/odom → robot_N/base_footprint` TF 검증
@@ -227,6 +227,17 @@ scp deployment/scripts/start-pinky-robot2-session.sh pinky@<robot-2-ip>:/home/pi
 ssh pinky@<robot-2-ip> 'chmod +x /home/pinky/start-pinky-robot2-session.sh && /home/pinky/start-pinky-robot2-session.sh'
 ```
 
+control interface와 watchdog를 처음 설치할 때는 로봇에서 control workspace를 빌드한다. 저장소의 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog` 디렉터리를 `/home/pinky/dev_ws/wj/src/` 아래에 복사한 뒤 다음을 실행한다.
+
+```bash
+cd /home/pinky/dev_ws/wj
+colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+```
+
+그 다음 hardware bringup을 별도 터미널에서 실행하고 session script를 다시 시작한다. script의 READY 출력에 `control: /control/manual_velocity -> /cmd_vel (watchdog)`가 있어야 한다.
+
 스크립트는 bringup을 시작하거나 종료하지 않는다. 종료 시 `Ctrl+C`를 누르면 스크립트가 시작한 카메라·republisher·rosbridge만 종료한다. 실행 중인 로봇은 정지 상태에서 시험한다.
 
-이 계약이 준비되지 않은 ROS 환경에서 이동 명령이 `UNSUPPORTED`로 거절되는 것은 정상 동작이다. ROS 실행과 현장 인수 절차는 프로젝트 루트의 `runbook.md`와 `acceptance-report.md`를 따른다.
+현재 단계의 실물 주행은 robot_2 한 대의 수동 저속 시험까지다. 목표점 클릭은 여전히 임무 waypoint를 만들 뿐이며, Nav2 action server·map→odom→base_footprint TF·실물 occupancy map을 검증하기 전에는 자동 목표 주행을 시작하지 않는다. ROS 실행과 현장 인수 절차는 프로젝트 루트의 `runbook.md`와 `acceptance-report.md`를 따른다.

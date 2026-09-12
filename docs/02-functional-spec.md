@@ -198,6 +198,8 @@ string active_command_id
 string command_state
 string reason_code
 string[] capabilities
+float64 linear_mps
+float64 angular_rps
 
 # srv/ControlCommand.srv
 string command_id
@@ -227,6 +229,8 @@ string reason_code
 ```
 
 ControlCommand operation은 stop/reset_stop/set_mode/apply_settings만 허용하고 parameters_json은 operation별 스키마 검증한다. set_mode는 mode, apply_settings는 version/values, stop/reset_stop은 빈 객체. FollowCommand operation은 pair/start/pause/unpair/rejoin. 서비스 accepted는 수락일 뿐이며 ControlStatus/FollowStatus가 완료를 확인한다. 거리 미측정은 measurement_valid=false로 제공한다. 양쪽 서버는 command_id 중복을 실행하지 않는다.
+
+실물 Pinky의 안전 중재 구현은 `ros/pinky_control_watchdog` 패키지다. 시작 시 정지 래치를 걸고, `reset_stop`은 자동 재개 없이 IDLE로만 전환한다. `set_mode: MANUAL` 이후에만 `TwistStamped` 수동 입력을 허용하며, 입력이 0.35초 이상 끊기면 `/cmd_vel`에 0을 계속 발행한다. 선속도·각속도는 각각 0.15m/s·0.50rad/s로 한 번 더 제한한다. `AUTO`·`FOLLOW` 입력은 `/control/nav_velocity`에서 받되 Nav2 연결 전에는 사용하지 않는다. `/cmd_vel`에는 이 중재기만 연결하고 관제 adapter는 직접 발행하지 않는다.
 
 필수 노드 감시는 ROS graph 존재 확인과 control heartbeat를 나란히 제공한다. 그래프에 노드가 존재한다고 정상 실행으로 판정하지 않는다. 센서 stale도 분리한다. 센서 시간/수신 시각/monotonic watchdog 시간을 혼합하지 않는다. 시뮬레이션 ROS time 정지는 데이터 stale로 표시하고 watchdog은 wall monotonic으로 유지한다.
 

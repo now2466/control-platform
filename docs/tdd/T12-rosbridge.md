@@ -23,7 +23,7 @@
 
 robot_2 실물 카메라 smoke 절차는 `deployment/scripts/start-pinky-robot2-session.sh`로 고정한다. bringup은 별도로 유지하고, 스크립트가 domain 13의 `camera_detect_node` `/camera/front`, `image_transport` raw→compressed 변환, rosbridge `9091`을 하나의 수명 주기로 관리한다. 시작 전 중복 camera/republisher/rosbridge를 거부하며, 원본 publisher와 compressed publisher가 각각 나타난 뒤에만 READY를 출력한다.
 
-현재 `pinky_control_interfaces`의 `ControlCommand`/`FollowCommand` 서버가 실제 로봇 저장소에 설치되어 있고 필드 계약이 일치하는 경우에만 `control_available`/`follow_available`을 true로 바꾼다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 서버가 없거나 계약이 확인되지 않은 상태의 주행·편대 제어 요청은 `UNSUPPORTED`다.
+`ros/pinky_control_interfaces`의 `ControlCommand`와 `ControlStatus`, `ros/pinky_control_watchdog`의 단일 출력 중재기를 추가했다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 중재기는 startup stop latch, `reset_stop` 후 자동 재개 금지, `MANUAL` mode gate, 0.35초 deadman, 0.15m/s·0.50rad/s clamp를 적용하고 `/cmd_vel`에 `Twist`만 발행한다. 서버가 설치되지 않은 환경의 주행·편대 제어 요청은 계속 `UNSUPPORTED`다. robot_2 local deployment만 설치·무이동 확인 뒤 `control_available=true`로 전환한다.
 
 ## 검증
 
@@ -38,3 +38,14 @@ cd backend && .venv/bin/python -m pytest tests/test_rosbridge_adapter.py tests/t
 ```text
 bash -n deployment/scripts/start-pinky-robot2-session.sh
 ```
+
+로봇 workspace 설치 후에는 다음을 무이동 상태에서 확인한다.
+
+```text
+colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog
+ros2 topic info /control/status -v
+ros2 service type /control/command
+ros2 topic info /cmd_vel -v
+```
+
+이후 `reset_stop`·`set_mode(MANUAL)` 응답, 수동 입력 중 `/cmd_vel`, 입력 중단 0.35초 이내 정지를 확인한 뒤에만 바퀴를 지면에 둔 저속 시험으로 진행한다.

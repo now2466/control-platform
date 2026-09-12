@@ -210,7 +210,7 @@ SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환
 - [x] `backend/pinky_control_center/resources/config/robots.ros.yaml`에 bridge endpoint/credentials/TLS/mapping과 고정 domain(`robot_1: 12`, `robot_2: 13`)을 기록하고 RobotAdapter를 두 개 구성해 rosbridge JSON 요청·feedback·결과를 연결한다. rosbridge 프로세스는 각 domain 환경으로 시작하며 관제 UI/API로 domain을 변경하지 않는다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
 - [x] `/tf`·`/tf_static`과 odom을 수신해 map TF graph를 합성하고, 지도 pose·TF validity·궤적을 상태에 반영한다. 실제 namespaced topic과 `base_footprint` 경로 실측 검증은 남긴다.
 - [x] 정지 조건 뒤 초기 위치를 `{ns}/initialpose`로 발행하고 수동 입력을 `{ns}/control/manual_velocity`로 발행한다. 최종 cmd_vel은 직접 발행하지 않는다.
-- [ ] 로봇 담당이 control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog을 구현한 결과를 연결한다. 미제공 기능은 UNSUPPORTED를 유지한다.
+- [x] `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 추가해 control status/command, 단일 cmd_vel 중재, stop 래치·watchdog을 구현했다. 실제 robot_2 workspace 설치와 저속 이동 시험은 T14 현장 gate로 남긴다.
 - [x] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다. 실제 토픽·FPS는 현장 검증이 남는다.
 - [ ] 무이동 상태에서 상태·영상·정지 응답을 먼저 시험한다. 현장 이동 시험 전에는 실물 속도 제어 enable을 열지 않는다.
 

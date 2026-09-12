@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { acquireLease, login, releaseLease, renewLease, session, stateSocket } from './api'
+import { setMode } from './control'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -37,4 +38,12 @@ test('late REST resync cannot overwrite a newer websocket snapshot', async () =>
   let resolve!: (value: Response) => void; const pending = new Promise<Response>(r => { resolve = r }); const events: any[] = []
   vi.stubGlobal('fetch', vi.fn().mockReturnValue(pending)); class Socket { static instances: Socket[] = []; onopen = () => {}; onmessage = (_: MessageEvent) => {}; onclose = () => {}; onerror = () => {}; constructor() { Socket.instances.push(this) } close() {} }
   vi.stubGlobal('WebSocket', Socket); const stop = stateSocket(value => events.push(value), () => {}); const instance = (Socket as any).instances?.[0]; instance.onmessage({ data: JSON.stringify({ type: 'snapshot', seq: 2, payload: { seq: 2 } }) }); instance.onmessage({ data: JSON.stringify({ type: 'robot_state', seq: 4, payload: { seq: 4, robots: [] } }) }); resolve(new Response(JSON.stringify({ seq: 3 }), { status: 200 })); await new Promise(r => setTimeout(r, 0)); expect(events.map(value => value.seq)).toEqual([2, 4]); stop()
+})
+
+test('manual mode request targets the selected robot', async () => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ command_id: 'cmd-1' }), { status: 202 }))
+  vi.stubGlobal('fetch', fetchMock)
+  await expect(setMode('robot_2', 'MANUAL')).resolves.toMatchObject({ command_id: 'cmd-1' })
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/robots/robot_2/mode')
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ mode: 'MANUAL' })
 })

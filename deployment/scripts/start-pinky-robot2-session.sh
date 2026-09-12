@@ -14,10 +14,12 @@ CONFIG_DIR="$PINKY_WS/install/rosy_control/share/rosy_control/config"
 
 CAMERA_TOPIC="/camera/front"
 COMPRESSED_TOPIC="/camera/image_raw/compressed"
+CONTROL_STATUS_TOPIC="/control/status"
 
 camera_pid=""
 republisher_pid=""
 rosbridge_pid=""
+watchdog_pid=""
 cleanup_done=0
 camera_library_path=""
 
@@ -30,14 +32,14 @@ cleanup() {
   [[ "$cleanup_done" -eq 0 ]] || return
   cleanup_done=1
   set +e
-  for pid in "$republisher_pid" "$camera_pid" "$rosbridge_pid"; do
+  for pid in "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid"; do
     if [[ -n "$pid" ]]; then
       # Each process is started in its own session so ros2run's child (for
       # example the Python rosbridge server) is stopped together with it.
       kill -INT -- "-$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null
     fi
   done
-  wait "$republisher_pid" "$camera_pid" "$rosbridge_pid" 2>/dev/null || true
+  wait "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid" 2>/dev/null || true
 }
 
 wait_for_publisher() {
@@ -90,6 +92,7 @@ command -v ros2 >/dev/null || fail "ros2 is not available after sourcing ROS Jaz
 ros2 pkg prefix rosy_control >/dev/null || fail "rosy_control package is not available"
 ros2 pkg prefix image_transport >/dev/null || fail "image_transport package is not available"
 ros2 pkg prefix rosbridge_server >/dev/null || fail "rosbridge_server package is not available"
+ros2 pkg prefix pinky_control_watchdog >/dev/null || fail "pinky_control_watchdog package is not available; build the control workspace first"
 
 if systemctl --user is-active --quiet rosy-session-control.service; then
   echo "Stopping rosy-session-control.service to avoid duplicate camera nodes..."
@@ -102,12 +105,31 @@ existing_camera="$(pgrep -u "$(id -un)" -f '[/]rosy_control/camera_detect_node' 
 existing_republisher="$(pgrep -u "$(id -un)" -f '[i]mage_transport republish raw compressed' || true)"
 [[ -z "$existing_republisher" ]] || fail "image republisher is already running (PID(s): $existing_republisher)"
 
+existing_watchdog="$(pgrep -u "$(id -un)" -f '[/]pinky_control_watchdog/manual_velocity_watchdog' || true)"
+[[ -z "$existing_watchdog" ]] || fail "pinky control watchdog is already running (PID(s): $existing_watchdog)"
+
 existing_bridge="$(pgrep -u "$(id -un)" -f "[r]osbridge_websocket.*--port.*${ROSBRIDGE_PORT}" || true)"
 [[ -z "$existing_bridge" ]] || fail "rosbridge is already running on port $ROSBRIDGE_PORT (PID(s): $existing_bridge)"
 
 echo "Starting rosbridge on port $ROSBRIDGE_PORT (ROS_DOMAIN_ID=$ROS_DOMAIN_ID)..."
 setsid ros2 run rosbridge_server rosbridge_websocket --port "$ROSBRIDGE_PORT" &
 rosbridge_pid=$!
+
+echo "Starting Pinky control watchdog..."
+setsid ros2 run pinky_control_watchdog manual_velocity_watchdog --ros-args \
+  -p robot_id:=robot_2 \
+  -p manual_topic:=/control/manual_velocity \
+  -p nav_topic:=/control/nav_velocity \
+  -p cmd_vel_topic:=/cmd_vel \
+  -p status_topic:="$CONTROL_STATUS_TOPIC" \
+  -p heartbeat_topic:=/control/heartbeat \
+  -p max_linear_mps:=0.15 \
+  -p max_angular_rps:=0.50 &
+watchdog_pid=$!
+
+if ! wait_for_publisher "$CONTROL_STATUS_TOPIC" "$watchdog_pid" 15; then
+  fail "control watchdog did not publish $CONTROL_STATUS_TOPIC within 15 seconds"
+fi
 
 echo "Starting Pinky camera publisher..."
 setsid env "LD_LIBRARY_PATH=$camera_library_path" ros2 run rosy_control camera_detect_node --ros-args \
@@ -136,7 +158,8 @@ echo "  ROS_DOMAIN_ID: $ROS_DOMAIN_ID"
 echo "  rosbridge:     ws://0.0.0.0:$ROSBRIDGE_PORT"
 echo "  camera:        $CAMERA_TOPIC"
 echo "  compressed:     $COMPRESSED_TOPIC"
+echo "  control:       /control/manual_velocity -> /cmd_vel (watchdog)"
 echo "Press Ctrl+C to stop this session. Hardware bringup is not stopped."
 
-wait -n "$rosbridge_pid" "$camera_pid" "$republisher_pid"
+wait -n "$rosbridge_pid" "$camera_pid" "$watchdog_pid" "$republisher_pid"
 exit $?

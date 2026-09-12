@@ -1,0 +1,6 @@
+string command_id
+string operation
+string parameters_json
+---
+bool accepted
+string reason_code

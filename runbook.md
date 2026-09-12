@@ -110,6 +110,6 @@ source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 deployment/launch/control_center.launch.py
 ```
 
-이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. compressed camera topic은 현재 raw camera 조사 결과만 있어 설정 후보가 미검증 상태이며, 실제 `CompressedImage` 발행 또는 변환 bridge를 확인하기 전에는 PASS로 기록하지 않는다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 다음 단계로 간다. control/follow 인터페이스, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
+이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. 실물 robot_2는 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 `/home/pinky/dev_ws/wj/src/`에 복사하고 `colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog`로 빌드한다. hardware bringup은 별도 터미널에서 실행하고, `deployment/scripts/start-pinky-robot2-session.sh`가 rosbridge·watchdog·카메라·압축 변환을 시작한다. `ros2 topic info /control/status -v`, `ros2 service type /control/command`, `/cmd_vel`의 유일한 publisher를 확인한다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 자동 주행 단계로 간다. control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
 
-검증 순서는 무이동 상태의 상태 수신 → 카메라 → 개별 정지 → 전체 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.
+검증 순서는 무이동 상태의 상태 수신 → 카메라 → stop/reset service → MANUAL mode → 입력 중단 watchdog → 저속 개별 주행 → 개별 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.
