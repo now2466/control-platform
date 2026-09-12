@@ -16,9 +16,12 @@ from collections import deque
 from dataclasses import dataclass
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import Twist, TwistStamped
+from nav2_msgs.action import NavigateToPose
 from pinky_control_interfaces.msg import ControlStatus
 from pinky_control_interfaces.srv import ControlCommand
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import UInt64
@@ -43,6 +46,7 @@ class ManualVelocityWatchdog(Node):
         self.declare_parameter("robot_id", "robot_2")
         self.declare_parameter("manual_topic", "/control/manual_velocity")
         self.declare_parameter("nav_topic", "/control/nav_velocity")
+        self.declare_parameter("navigate_action_name", "/navigate_to_pose")
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("status_topic", "/control/status")
         self.declare_parameter("heartbeat_topic", "/control/heartbeat")
@@ -68,6 +72,15 @@ class ManualVelocityWatchdog(Node):
         self._last_output = _Velocity()
         self._heartbeat = 0
         self._recent_command_ids: deque[str] = deque(maxlen=128)
+        self._nav_client = ActionClient(
+            self,
+            NavigateToPose,
+            str(self.get_parameter("navigate_action_name").value),
+        )
+        self._nav_goal_handle = None
+        self._nav_command_id = ""
+        self._canceled_navigation_ids: set[str] = set()
+        self._navigation_terminal_at = 0.0
 
         reliable = QoSProfile(depth=10, reliability=QoSReliabilityPolicy.RELIABLE)
         self._cmd_pub = self.create_publisher(
@@ -101,7 +114,8 @@ class ManualVelocityWatchdog(Node):
         self.get_logger().info(
             f"Pinky control watchdog ready: robot_id={self.robot_id}, "
             f"manual_timeout={self.manual_timeout:.2f}s, "
-            f"limits={self.max_linear:.2f}m/s/{self.max_angular:.2f}rad/s"
+            f"limits={self.max_linear:.2f}m/s/{self.max_angular:.2f}rad/s, "
+            f"navigate_action={self.get_parameter('navigate_action_name').value}"
         )
 
     def _manual_callback(self, message: TwistStamped) -> None:
@@ -148,10 +162,14 @@ class ManualVelocityWatchdog(Node):
             return self._reject(response, "INVALID_PARAMETERS")
 
         if operation == "stop":
+            self._cancel_navigation()
             self.stop_latched = True
             self.mode = "STOPPED"
             self.reason_code = "OPERATOR_STOP"
         elif operation == "reset_stop":
+            # Releasing the latch must never resume a goal that was accepted
+            # before the stop.  A new map request must send a new goal.
+            self._cancel_navigation()
             self.stop_latched = False
             self.mode = "IDLE"
             self.reason_code = "STOP_RESET_NO_AUTO_RESUME"
@@ -163,7 +181,16 @@ class ManualVelocityWatchdog(Node):
                 self.stop_latched = True
             elif self.stop_latched:
                 return self._reject(response, "STOP_LATCHED")
+            if mode != "AUTO":
+                self._cancel_navigation()
             self.mode = str(mode)
+        elif operation == "navigate":
+            return self._start_navigation(parameters, command_id, response)
+        elif operation == "cancel_navigation":
+            self._cancel_navigation()
+            if not self.stop_latched:
+                self.mode = "IDLE"
+            self.reason_code = "NAVIGATION_CANCELED"
         elif operation == "apply_settings":
             values = parameters.get("values", parameters)
             if not isinstance(values, dict):
@@ -193,6 +220,110 @@ class ManualVelocityWatchdog(Node):
         response.reason_code = reason
         return response
 
+    def _start_navigation(self, parameters: dict[str, object], command_id: str, response: ControlCommand.Response):
+        if self.stop_latched:
+            return self._reject(response, "STOP_LATCHED")
+        if self._nav_command_id or self._nav_goal_handle is not None:
+            return self._reject(response, "NAVIGATION_BUSY")
+        if not self._nav_client.wait_for_server(timeout_sec=0.25):
+            return self._reject(response, "NAVIGATION_UNAVAILABLE")
+        goal = parameters.get("goal")
+        if not isinstance(goal, dict):
+            return self._reject(response, "INVALID_GOAL")
+        frame_id = goal.get("frame_id", "map")
+        values = (goal.get("x"), goal.get("y"), goal.get("yaw"))
+        if not isinstance(frame_id, str) or not frame_id or not all(_finite(value) for value in values):
+            return self._reject(response, "INVALID_GOAL")
+
+        goal_message = NavigateToPose.Goal()
+        goal_message.pose.header.frame_id = frame_id
+        goal_message.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_message.pose.pose.position.x = float(goal["x"])
+        goal_message.pose.pose.position.y = float(goal["y"])
+        goal_message.pose.pose.position.z = 0.0
+        goal_message.pose.pose.orientation.z = math.sin(float(goal["yaw"]) / 2.0)
+        goal_message.pose.pose.orientation.w = math.cos(float(goal["yaw"]) / 2.0)
+
+        self._nav_command_id = command_id
+        self._active_command_id = command_id
+        self._command_state = "RUNNING"
+        self.reason_code = "NAVIGATION_REQUESTED"
+        self._navigation_terminal_at = 0.0
+        try:
+            future = self._nav_client.send_goal_async(goal_message)
+            future.add_done_callback(lambda result: self._goal_response_callback(command_id, result))
+        except Exception:
+            self._nav_command_id = ""
+            return self._reject(response, "NAVIGATION_SEND_FAILED")
+        response.accepted = True
+        response.reason_code = ""
+        return response
+
+    def _goal_response_callback(self, command_id: str, future) -> None:
+        try:
+            goal_handle = future.result()
+        except Exception:
+            if command_id not in self._canceled_navigation_ids:
+                self._finish_navigation(command_id, "FAILED", "NAVIGATION_SEND_FAILED")
+            else:
+                self._canceled_navigation_ids.discard(command_id)
+            return
+        if command_id in self._canceled_navigation_ids:
+            self._canceled_navigation_ids.discard(command_id)
+            if goal_handle.accepted:
+                goal_handle.cancel_goal_async()
+            return
+        if command_id != self._nav_command_id:
+            if goal_handle.accepted:
+                goal_handle.cancel_goal_async()
+            return
+        if not goal_handle.accepted:
+            self._finish_navigation(command_id, "REJECTED", "NAVIGATION_GOAL_REJECTED")
+            return
+        self._nav_goal_handle = goal_handle
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(lambda result: self._goal_result_callback(command_id, result))
+
+    def _goal_result_callback(self, command_id: str, future) -> None:
+        if command_id != self._nav_command_id:
+            return
+        try:
+            status = int(future.result().status)
+        except Exception:
+            self._finish_navigation(command_id, "FAILED", "NAVIGATION_RESULT_UNAVAILABLE")
+            return
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self._finish_navigation(command_id, "SUCCEEDED", "NAVIGATION_SUCCEEDED")
+        elif status == GoalStatus.STATUS_CANCELED:
+            self._finish_navigation(command_id, "CANCELED", "NAVIGATION_CANCELED")
+        else:
+            self._finish_navigation(command_id, "FAILED", "NAVIGATION_FAILED")
+
+    def _finish_navigation(self, command_id: str, state: str, reason: str) -> None:
+        if command_id != self._nav_command_id:
+            return
+        self._nav_goal_handle = None
+        self._nav_command_id = ""
+        self._active_command_id = ""
+        self._command_state = state
+        self.reason_code = reason
+        self.mode = "IDLE"
+        self._navigation_terminal_at = time.monotonic()
+
+    def _cancel_navigation(self) -> None:
+        command_id = self._nav_command_id
+        goal_handle = self._nav_goal_handle
+        if command_id:
+            self._canceled_navigation_ids.add(command_id)
+        self._nav_command_id = ""
+        self._nav_goal_handle = None
+        self._active_command_id = ""
+        if goal_handle is not None:
+            try:
+                goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+
     def _publish_output(self) -> None:
         now = time.monotonic()
         output = _Velocity()
@@ -215,6 +346,10 @@ class ManualVelocityWatchdog(Node):
         self._last_output = output
 
     def _publish_status(self) -> None:
+        if self._navigation_terminal_at and time.monotonic() - self._navigation_terminal_at > 1.0:
+            self._navigation_terminal_at = 0.0
+            self._command_state = "IDLE"
+            self.reason_code = ""
         self._heartbeat += 1
         status = ControlStatus()
         status.stamp = self.get_clock().now().to_msg()
@@ -225,7 +360,7 @@ class ManualVelocityWatchdog(Node):
         status.command_state = self._command_state
         status.reason_code = self.reason_code
         status.capabilities = ["manual"]
-        if time.monotonic() - self._nav.received_at <= self.nav_timeout:
+        if self._nav_client.server_is_ready():
             status.capabilities.append("navigate")
         status.linear_mps = self._last_output.linear
         status.angular_rps = self._last_output.angular

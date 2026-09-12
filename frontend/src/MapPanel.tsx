@@ -12,7 +12,7 @@ type Layer = 'map' | 'scan' | 'local_costmap' | 'global_costmap'
 type SelectionMode = 'start' | 'destination'
 const fallback: MapInfo = { width: 1, height: 1, resolution: 1, origin: { x: 0, y: 0, yaw: 0 } }
 
-export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChange, initialPose, onInitialPoseChange, onResetSelections }: { robots: Robot[]; selected: string; mapId?: string | null; onSelect: (id: string) => void; onGoalChange?: (goal: Goal | null) => void; initialPose?: Goal | null; onInitialPoseChange?: (pose: Goal | null) => void; onResetSelections?: () => void }) {
+export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChange, initialPose, onInitialPoseChange, onResetSelections, onNavigate, navigationReady = false, navigationBusy = false, onResetLocalization, localizationReady = false, localizationBusy = false, navigationStatus = '' }: { robots: Robot[]; selected: string; mapId?: string | null; onSelect: (id: string) => void; onGoalChange?: (goal: Goal | null) => void; initialPose?: Goal | null; onInitialPoseChange?: (pose: Goal | null) => void; onResetSelections?: () => void; onNavigate?: () => void; navigationReady?: boolean; navigationBusy?: boolean; onResetLocalization?: () => void; localizationReady?: boolean; localizationBusy?: boolean; navigationStatus?: string }) {
   const [metadata, setMetadata] = useState<MapMetadata | null>(null)
   const [error, setError] = useState('')
   const [view, setView] = useState<View>({ scale: 1, offsetX: 0, offsetY: 0 })
@@ -54,6 +54,8 @@ export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChan
   const costmap = layer === 'scan' || layer === 'map' ? undefined : selectedLayers?.costmaps.find(item => item.name === layer)
   const layerState = layer === 'map' ? 'OK' : layer === 'scan' ? selectedLayers?.scan.state : costmap?.state
   const layerLabel = layer === 'map' ? '지도' : layer === 'scan' ? 'Scan' : layer === 'local_costmap' ? 'Local costmap' : 'Global costmap'
+  const canResetLocalization = Boolean(localizationReady && initialPose && onResetLocalization && !localizationBusy)
+  const canNavigate = Boolean(navigationReady && initialPose && preview && onNavigate && !navigationBusy)
   const zoom = (factor: number) => setView(current => ({ ...current, scale: Math.max(.5, Math.min(4, current.scale * factor)) }))
   const pan = (x: number, y: number) => setView(current => ({ ...current, offsetX: current.offsetX + x, offsetY: current.offsetY + y }))
   const toCanvas = (event: { currentTarget: SVGElement; clientX: number; clientY: number }) => { const svg = event.currentTarget.ownerSVGElement ?? event.currentTarget as SVGSVGElement, rect = svg.getBoundingClientRect(); const clientX = Number.isFinite(event.clientX) ? event.clientX : 0, clientY = Number.isFinite(event.clientY) ? event.clientY : 0; return { x: ((clientX - rect.left) / rect.width) * map.width, y: ((clientY - rect.top) / rect.height) * map.height } }
@@ -75,7 +77,7 @@ export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChan
   }
 
   return <section className="map-panel">
-    <div className="map-toolbar"><h2>지도 · 로봇 위치</h2><div><button className={selectionMode === 'start' ? 'active' : ''} onClick={() => setSelectionMode('start')}>시작점 설정</button><button className={selectionMode === 'destination' ? 'active' : ''} onClick={() => setSelectionMode('destination')}>도착점 설정</button><button onClick={() => { setPreview(null); onGoalChange?.(null); onInitialPoseChange?.(null); onResetSelections?.() }}>설정 초기화</button><button onClick={() => setView({ scale: 1, offsetX: 0, offsetY: 0 })}>전체 보기</button><button onClick={() => zoom(1.25)}>확대</button><button onClick={() => zoom(.8)}>축소</button><button onClick={() => pan(-10, 0)}>←</button><button onClick={() => pan(10, 0)}>→</button><button className={following ? 'active' : ''} onClick={() => setFollowing(value => !value)}>선택 따라보기</button></div></div>
+    <div className="map-toolbar"><h2>지도 · 로봇 위치</h2><div><button className={selectionMode === 'start' ? 'active' : ''} onClick={() => setSelectionMode('start')}>시작점 설정</button><button className={selectionMode === 'destination' ? 'active' : ''} onClick={() => setSelectionMode('destination')}>도착점 설정</button><button onClick={() => { setPreview(null); onGoalChange?.(null); onInitialPoseChange?.(null); onResetSelections?.() }}>설정 초기화</button><button disabled={!canResetLocalization} onClick={onResetLocalization}>{localizationBusy ? '위치 재설정 중…' : '위치 재설정(AMCL)'}</button><button disabled={!canNavigate} onClick={onNavigate}>{navigationBusy ? '이동 요청 중…' : '시작점에서 도착점으로 이동'}</button><button onClick={() => setView({ scale: 1, offsetX: 0, offsetY: 0 })}>전체 보기</button><button onClick={() => zoom(1.25)}>확대</button><button onClick={() => zoom(.8)}>축소</button><button onClick={() => pan(-10, 0)}>←</button><button onClick={() => pan(10, 0)}>→</button><button className={following ? 'active' : ''} onClick={() => setFollowing(value => !value)}>선택 따라보기</button></div></div>
     <div className="sensor-toolbar"><span>선택 로봇 센서</span>{(['map', 'scan', 'local_costmap', 'global_costmap'] as Layer[]).map(value => <button key={value} className={layer === value ? 'active' : ''} onClick={() => setLayer(value)}>{value === 'map' ? '지도' : value === 'scan' ? 'Scan' : value === 'local_costmap' ? 'Local costmap' : 'Global costmap'}</button>)}</div>
     {error && <div className="error">{error}</div>}
     <svg viewBox={`0 0 ${map.width} ${map.height}`} className="map">
@@ -90,6 +92,6 @@ export default function MapPanel({ robots, selected, mapId, onSelect, onGoalChan
     {cellError && <p className="map-warning">{cellError}</p>}{sensorError && <p className="map-warning">센서 상세: {sensorError}</p>}
     {layer !== 'map' && <p className="map-note">{layerLabel} · {layerState === 'UNSUPPORTED' ? '지원하지 않음' : layerState === 'STALE' ? '데이터 지연' : layerState === 'ERROR' ? '오류' : layerState === 'OK' ? 'OK' : '상태 확인 중'}</p>}
     {robots.some(robot => !robot.tf_valid) && <p className="map-warning">TF 변환을 확인할 수 없어 편대 거리·방위각을 표시하지 않습니다.</p>}
-    <p className="map-note">{selected ? `선택: ${selected}` : '로봇을 선택하세요'} · {selectionMode === 'start' ? '지도에서 시작 위치를 클릭하고 드래그하세요.' : '지도에서 도착 위치를 클릭하고 드래그하세요. 목표 미리보기를 표시합니다.'} 명령은 전송하지 않습니다.</p>
+    <p className="map-note">{selected ? `선택: ${selected}` : '로봇을 선택하세요'} · {selectionMode === 'start' ? '지도에서 시작 위치를 클릭하고 드래그하세요.' : '지도에서 도착 위치를 클릭하고 드래그하세요. 목표 미리보기를 표시합니다.'} {navigationReady ? '두 점과 AMCL 위치를 확인한 뒤 이동 버튼으로 주행을 시작하세요.' : '제어권·정지 해제·신선한 map TF·navigate 준비 상태가 필요합니다.'} {navigationStatus}</p>
   </section>
 }

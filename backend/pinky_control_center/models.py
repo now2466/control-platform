@@ -341,6 +341,25 @@ class InitialPoseRequest(BaseModel):
     pose: Pose
 
 
+class MapNavigationRequest(BaseModel):
+    """One guarded, single-robot navigation request from the map UI."""
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    lease_id: UUID | None = None
+    map_id: str = Field(min_length=1, max_length=128)
+    start_pose: Pose
+    goal: Pose
+
+
+class LocalizationResetRequest(BaseModel):
+    """Reset the robot's localization estimate without starting motion."""
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    lease_id: UUID | None = None
+    map_id: str = Field(min_length=1, max_length=128)
+    pose: Pose
+
+
 class MockScenarioRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scenario: MockScenario

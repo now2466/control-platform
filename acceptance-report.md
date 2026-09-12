@@ -1,6 +1,6 @@
-# T14 통합·인수 기록
+# T14/T15 통합·인수 기록
 
-작성일: 2026-09-11  ·  기준: `dev`  ·  영상 녹화/재생(T11): 제외
+작성일: 2026-09-12  ·  기준: `dev`  ·  영상 녹화/재생(T11): 제외
 
 이 문서는 mock에서 재현 가능한 수용 증거와 ROS/Gazebo 현장 검증을 분리해 기록한다. `PASS`는 실행 증거가 저장된 항목, `FAIL`은 assertion 또는 계약 위반, `NOT_RUN`은 ROS·하드웨어 전제가 없어 실행하지 않은 항목이다.
 
@@ -23,6 +23,7 @@ deployment/scripts/acceptance.sh
 | A07 카메라 한 대 중단 | PASS | 같은 test의 robot_2 `503`, robot_1 `200` assertion |
 | A08 중복 request_id | PASS | `test_a08_duplicate_request_id_does_not_create_a_second_command` |
 | N09 HTTPS Secure cookie | PASS | `test_n09_secure_cookie_switch_is_explicit` |
+| A17 지도 클릭 주행·수동 재배치 후 AMCL 재설정 | PASS | `backend/tests/test_t15_map_navigation.py`, `frontend/src/MapPanel.test.tsx` |
 
 ## ROS/Gazebo gate
 
@@ -36,10 +37,14 @@ deployment/scripts/acceptance.sh
 | compressed camera topic 매핑·두 스트림·실제 FPS/p95 | NOT_RUN | 실제 `CompressedImage` topic/변환 확인, 10분 측정 CSV/스크린샷 |
 | control/follow 수락·결과·재연결 | NOT_RUN | command_id 로그와 adapter contract test |
 | stop latch·watchdog·최종 cmd_vel 단일 중재 | NOT_RUN | 로봇 측 출력 0 및 래치 증거 |
+| robot_2 control/watchdog/navigation 패키지 build | PASS | 2026-09-12 `/home/pinky/dev_ws/wj`에서 3개 패키지 `colcon build` 통과 |
+| `/navigate_to_pose` action·AMCL lifecycle·정적 map server | NOT_RUN | `ros2 action list -t`, lifecycle 상태, map topic |
+| `map→odom→base_footprint` 및 라이다 costmap 반영 | NOT_RUN | `tf2_echo`, local/global costmap 및 `/scan` QoS |
+| 지도 시작점→AMCL→AUTO→목표 저속 주행 | NOT_RUN | 무이동 수락 로그와 물리 정지/재배치 재시험 기록 |
 | Gazebo 무이동 상태→개별/전체 정지 | NOT_RUN | rosbag/로그, command 결과 |
 | 두 Gazebo 인스턴스 spawn 위치 분리 | NOT_RUN | x/y spawn 인자를 지원하는 별도 world 또는 launch 수정. 현재 기본 위치 중첩 가능 |
 | 1시간 지도+영상 RSS/큐/N01~N03 | NOT_RUN | 측정값, 호스트 사양, 시계 동기 상태 |
 
-실물에서 제공되지 않은 follow/control 서비스는 `UNSUPPORTED`로 표시하며 PASS로 대체하지 않는다. 서버 재시작 뒤 자동 주행 재개가 관찰되면 즉시 FAIL로 기록하고 임무를 재개하지 않은 상태에서 원인을 수정한다.
+실물에서 제공되지 않은 follow/control 서비스는 `UNSUPPORTED`로 표시하며 PASS로 대체하지 않는다. Nav2 action server 또는 AMCL/TF가 준비되지 않으면 자동 주행 버튼을 사용하지 않는다. 서버 재시작 뒤 자동 주행 재개가 관찰되면 즉시 FAIL로 기록하고 임무를 재개하지 않은 상태에서 원인을 수정한다. 시험 중 로봇을 들어 옮길 때는 정지 확인 후 `localization-reset`을 사용하며, 정적 map 파일을 초기화하지 않는다.
 
 rosbridge는 systemd API 서비스와 별도 lifecycle이다. ROS supervisor가 종료·재시작을 관리하며, API 서비스만 재시작해도 rosbridge가 자동으로 생긴다고 가정하지 않는다.

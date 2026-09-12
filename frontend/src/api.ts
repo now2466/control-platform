@@ -88,6 +88,16 @@ async function mutation(path: string, body: Record<string, unknown>, fallback: s
   return response.json()
 }
 
+export async function navigateRobot(robotId: string, mapId: string, startPose: Goal, goal: Goal, leaseId: string): Promise<{ command_id: string; navigation_id: string }> {
+  if (!leaseId) throw new Error('제어권이 필요합니다.')
+  return mutation(`/api/v1/robots/${robotId}/navigate`, { map_id: mapId, start_pose: startPose, goal, lease_id: leaseId }, '이동 요청 실패') as Promise<{ command_id: string; navigation_id: string }>
+}
+
+export async function resetLocalization(robotId: string, mapId: string, pose: Goal, leaseId: string): Promise<{ command_id: string }> {
+  if (!leaseId) throw new Error('제어권이 필요합니다.')
+  return mutation(`/api/v1/robots/${robotId}/localization-reset`, { map_id: mapId, pose, lease_id: leaseId }, '위치 재설정 요청 실패') as Promise<{ command_id: string }>
+}
+
 export async function formationAction(action: 'pair' | 'pause' | 'unpair' | 'rejoin', master_id: string, slave_id: string, lease_id: string) {
   if (!lease_id) throw new Error('제어권이 필요합니다.')
   return mutation('/api/v1/formation/actions', { action, master_id, slave_id, lease_id }, '편대 요청 실패')

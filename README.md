@@ -46,23 +46,24 @@ mkdir -p ~/.local/state/control-platform
 | T09 | 설정·정적 지도·초기 위치 | 완료(mock, 축소 범위) |
 | T10 | 기록·검색 | 완료 — 30일 운용 이력, 조건 조회·JSON 내보내기 |
 | T11 | 영상 기록·동기 재생 | 범위 제외 |
-| T12 | ROS 2·실물 인터페이스 연동 | 부분 완료 — rosbridge adapter, TF 합성, 초기 위치·수동 중재 토픽 contract test; 실제 graph·camera·stop은 NOT_RUN |
+| T12 | ROS 2·실물 인터페이스 연동 | 부분 완료 — rosbridge adapter, TF 합성, 초기 위치·수동 중재·watchdog contract; 실제 graph·stop은 현장 gate |
 | T13 | 인증 강화·배포 | 부분 완료 — TLS 동일 출처 proxy, single-worker service, env 검증, runbook |
 | T14 | 통합 인수·실물 검증 | 부분 완료 — mock acceptance smoke; Gazebo·실물 시험 NOT_RUN |
+| T15 | 지도 클릭 단일 로봇 주행·AMCL 재현지화 | 구현 완료(mock/API/UI/ROS 패키지); robot_2 패키지 build PASS, Nav2/AMCL/TF·저속 주행은 NOT_RUN |
 
-T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. 현재 `map_260905`는 현장 SDF world의 box geometry를 rasterize한 정적 지도이며, `시작점 설정`·`도착점 설정`·`설정 초기화`로 지도 위 후보를 관리한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T09는 versioned active settings, ADMIN 설정 화면, 정지 상태 초기 위치와 정적 지도 선택을 제공한다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 T12 현장 gate 범위다.
+T03 화면은 인증된 지도 metadata/PNG와 상태 snapshot의 위치·궤적·경로를 표시하고 카드와 로봇 선택을 동기화한다. 현재 `map_260905`는 현장 SDF world의 box geometry를 rasterize한 정적 지도이며, `시작점 설정`·`도착점 설정`·`설정 초기화`로 지도 위 후보를 관리한다. T04 카메라 그리드, T06 편대·단일 목표 임무, T07 경유점·순찰, T08 알림·선택 로봇 센서 레이어, T09 설정·정적 지도·초기 위치를 mock adapter 기준으로 완료했다. T15는 선택 로봇에 대해 `위치 재설정(AMCL)`과 명시적 지도 주행 요청을 제공하며, 로봇을 들어 옮길 때도 정적 지도를 다시 그리지 않는다. SLAM, accessory 장치, 로봇 등록/역할 변경 및 실제 ROS 적용은 현장 gate 범위다.
 
 설정 적용은 adapter와 SQLite의 활성값을 같은 프로세스에서 함께 갱신하므로 현재 서버는 단일 worker만 지원한다. CLI는 worker 1개로 실행되며 `CONTROL_PLATFORM_WORKERS=1` 이외의 선언은 시작 시 거절한다.
 
 새 기능은 테스트를 먼저 작성해 RED를 확인하고 최소 구현 후 GREEN, 정리 단계까지 진행한다. 단계별 증거는 `docs/tdd/`에 기록하며 설정·수집 실패와 실제 동작 assertion 실패를 구분한다.
 
-T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 아직 구현하지 않는다.
+T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인증 상태 API와 상태 WebSocket 재연결을 확인할 수 있다. 실물 정지 래치, watchdog, 수동 조작은 T05 이후 범위이며 ROS 모드 현장 검증은 별도 gate다.
 
-T05 frontend 검증은 frontend Vitest 27개와 backend mock/runtime tests 38개를 통과했다. 정지·watchdog의 동작은 mock/runtime 검증 결과이며 실제 로봇 safety wiring과 ROS watchdog 시험은 T12에서 수행한다.
+현재 frontend Vitest 55개와 backend pytest 113개를 통과했다. 정지·watchdog의 동작은 mock/runtime 검증 결과이며 실제 로봇 safety wiring과 ROS watchdog 시험은 T12/T15 현장 gate에서 수행한다.
 
 실물 연결은 로봇별 rosbridge websocket을 사용한다. 배포 고정값은 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`이며 관제 UI/API에서 domain ID를 변경하지 않는다. backend의 RobotAdapter가 두 연결을 관리하고 bridge URL·인증/TLS·토픽 매핑만 설정으로 관리한다. 브라우저는 rosbridge에 직접 연결하지 않으며 단절 시 reconnect와 stale 상태를 표시한다. 카메라는 rosbridge의 compressed image JSON/base64를 기본으로 하며 quality·throttle·fragment를 조정한다.
 
-배포와 mock 수용 절차는 [runbook.md](runbook.md), 결과 추적표는 [acceptance-report.md](acceptance-report.md)에서 관리한다. rosbridge launch는 API systemd 서비스와 별도 lifecycle이며, Gazebo 기본 spawn 위치 중첩과 compressed camera topic은 실제 인수 전까지 미검증으로 유지한다.
+배포와 mock 수용 절차는 [runbook.md](runbook.md), 결과 추적표는 [acceptance-report.md](acceptance-report.md)에서 관리한다. rosbridge·robot_2 Nav2 session은 API systemd 서비스와 별도 lifecycle이며, 실제 action/AMCL/TF·저속 주행은 acceptance gate에서 확인한다.
 
 ## 읽는 순서
 

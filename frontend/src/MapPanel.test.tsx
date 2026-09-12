@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
 import { afterEach, expect, test, vi } from 'vitest'
 import MapPanel from './MapPanel'
 
@@ -48,4 +49,19 @@ test('map selection buttons assign a start pose and destination, and reset clear
   expect(onInitialPoseChange).toHaveBeenLastCalledWith(null)
   expect(onGoalChange).toHaveBeenLastCalledWith(null)
   expect(onResetSelections).toHaveBeenCalledOnce()
+})
+
+test('navigation stays gated until a destination is selected and dispatches the request', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ map_id: 'mock_lab', name: 'Mock Lab', frame_id: 'map', resolution: .1, width: 20, height: 20, origin: { x: 0, y: 0, yaw: 0 }, version: '1', data_url: '/api/v1/maps/mock_lab/data' }), { status: 200 }))
+  const onNavigate = vi.fn()
+  render(<MapPanel robots={[{ ...robot, pose_freshness: 'FRESH', tf_valid: true }]} selected="robot_1" mapId="mock_lab" onSelect={() => {}} initialPose={{ x: 1, y: 1, yaw: 0, frame_id: 'map' }} onGoalChange={() => {}} onNavigate={onNavigate} navigationReady navigationStatus="" />)
+  await screen.findByText(/목표 미리보기/)
+  const svg = document.querySelector('svg')!
+  vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 200, height: 200, top: 0, left: 0, bottom: 200, right: 200, toJSON: () => ({}) })
+  expect(screen.getByRole('button', { name: '시작점에서 도착점으로 이동' })).toBeDisabled()
+  const inputLayer = document.querySelector('.map-input-layer')!
+  fireEvent.pointerDown(inputLayer, { clientX: 100, clientY: 100 }); fireEvent.click(inputLayer, { clientX: 100, clientY: 100 })
+  expect(screen.getByRole('button', { name: '시작점에서 도착점으로 이동' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: '시작점에서 도착점으로 이동' }))
+  expect(onNavigate).toHaveBeenCalledOnce()
 })

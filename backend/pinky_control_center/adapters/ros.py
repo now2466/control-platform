@@ -327,6 +327,14 @@ class RosbridgeAdapter:
             reason = value_reason if isinstance(value_reason, str) else None
         result = CommandAcceptance(accepted=accepted, reason_code=reason if not accepted else None)
         pending.future.set_result(result)
+        if result.accepted and pending.command.operation == "navigate":
+            try:
+                goal = Pose.model_validate(pending.command.parameters["goal"])
+                self._states[robot_id] = self._states[robot_id].model_copy(update={"goal": goal})
+            except (KeyError, TypeError, ValueError):
+                pass
+        elif result.accepted and pending.command.operation in {"stop", "cancel_navigation"}:
+            self._states[robot_id] = self._states[robot_id].model_copy(update={"goal": None})
         await self._emit("command", robot_id, {
             "command_id": str(pending.command.command_id),
             "state": "SUCCEEDED" if result.accepted else "REJECTED",

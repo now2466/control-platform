@@ -27,6 +27,7 @@ class MockRobotAdapter:
         self._command_events: list[AdapterEvent] = []
         self._config = config or load_mock_config()
         self._initial_poses: dict[RobotId, Pose] = {}
+        self._goals: dict[RobotId, Pose] = {}
         self._settings: dict[str, object] = {}
         self._velocities: dict[RobotId, tuple[float, float]] = {}
 
@@ -65,6 +66,11 @@ class MockRobotAdapter:
                 return CommandAcceptance(accepted=False, reason_code="ROBOT_NOT_STOPPED")
             try:
                 self._initial_poses[command.robot_id] = Pose.model_validate(command.parameters["pose"])
+            except (KeyError, TypeError, ValueError):
+                return CommandAcceptance(accepted=False, reason_code="INVALID_VALUE")
+        elif command.operation == "navigate":
+            try:
+                self._goals[command.robot_id] = Pose.model_validate(command.parameters["goal"])
             except (KeyError, TypeError, ValueError):
                 return CommandAcceptance(accepted=False, reason_code="INVALID_VALUE")
         self._command_events.append(AdapterEvent(
@@ -109,7 +115,7 @@ class MockRobotAdapter:
             sensors=[SensorStatus(name="camera", state=SensorState.OK, received_at=now)],
             trail=[{"x": 0.6, "y": 2.0}, {"x": 0.9, "y": 2.0}, {"x": 1.2, "y": 2.0}],
             path=[{"x": 1.2, "y": 2.0}, {"x": 1.5, "y": 2.2}, {"x": 1.8, "y": 2.4}],
-            goal=Pose(x=1.8, y=2.4, yaw=0.4, frame_id="map"),
+            goal=self._goals.get("robot_1", Pose(x=1.8, y=2.4, yaw=0.4, frame_id="map")),
         )
         slave = RobotState(
             robot_id="robot_2", name=slave_config.name, role=slave_config.role,
@@ -125,6 +131,7 @@ class MockRobotAdapter:
             sensors=[SensorStatus(name="camera", state=SensorState.STALE if self._scenario is MockScenario.CAMERA_STALL else SensorState.OK, received_at=None if offline else now)],
             trail=[] if offline else [{"x": 0.0, "y": 2.0}, {"x": 0.2, "y": 2.0}, {"x": 0.4, "y": 2.0}],
             path=[] if offline else [{"x": 0.4, "y": 2.0}, {"x": 0.7, "y": 2.1}, {"x": 1.0, "y": 2.2}],
+            goal=self._goals.get("robot_2"),
         )
         formation = FormationState(
             state=FormationMode.LOST if self._scenario is MockScenario.FOLLOW_LOST else FormationMode.UNPAIRED,

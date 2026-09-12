@@ -1,6 +1,6 @@
 # Pinky Control Center 운영 런북
 
-이 런북은 현재 checkout에서 확인 가능한 mock 운영과 T12 ROS/Gazebo 인수 준비를 구분한다. T11 영상 녹화·재생은 범위에 없으며, 브라우저는 rosbridge에 직접 연결하지 않는다. 실물 주행 전에는 로봇 측 정지 래치와 watchdog을 별도로 확인한다.
+이 런북은 현재 checkout에서 확인 가능한 mock 운영과 T12~T15 ROS/실물 인수 준비를 구분한다. T11 영상 녹화·재생은 범위에 없으며, 브라우저는 rosbridge에 직접 연결하지 않는다. 실물 주행 전에는 로봇 측 정지 래치·watchdog·Nav2 action server를 별도로 확인한다.
 
 ## 1. 설치와 빌드
 
@@ -112,4 +112,91 @@ source /opt/ros/jazzy/setup.bash
 
 이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. 실물 robot_2는 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 `/home/pinky/dev_ws/wj/src/`에 복사하고 `colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog`로 빌드한다. hardware bringup은 별도 터미널에서 실행하고, `deployment/scripts/start-pinky-robot2-session.sh`가 rosbridge·watchdog·카메라·압축 변환을 시작한다. `ros2 topic info /control/status -v`, `ros2 service type /control/command`, `/cmd_vel`의 유일한 publisher를 확인한다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 자동 주행 단계로 간다. control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
 
-검증 순서는 무이동 상태의 상태 수신 → 카메라 → stop/reset service → MANUAL mode → 입력 중단 watchdog(선택 로봇 0속도, 정상 래치 없음) → 저속 개별 주행 → 개별 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 웹소켓 단절·lease 만료·명시적 정지는 별도 보호 정지 래치로 확인한다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.
+검증 순서는 무이동 상태의 상태 수신 → 카메라 → stop/reset service → MANUAL mode → 입력 중단 watchdog(선택 로봇 0속도, 정상 래치 없음) → Nav2 action/AMCL/TF 확인 → 저속 개별 주행 → 개별 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 웹소켓 단절·lease 만료·명시적 정지는 별도 보호 정지 래치로 확인한다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.
+
+## 6. robot_2 단일 로봇 지도 주행·재현지화 시험
+
+이 절차는 `robot_2`, ROS_DOMAIN_ID `13`, 로봇 주소 `192.168.4.1`인 현재 시험 구성을 기준으로 한다. `robot_1` domain 12와는 별도 rosbridge를 사용한다. 아래 절차를 수행해도 실제 이동 명령은 현장 담당자가 안전을 확인한 뒤 직접 실행해야 한다.
+
+### 6.1 로봇 측 패키지 설치·빌드
+
+로봇의 기존 bringup/session 프로세스를 확인한 뒤, 소스 패키지를 명시된 workspace에 복사한다. 기존 bringup은 유지할 수 있지만, 이전에 별도로 실행한 camera publisher·image republisher·rosbridge·watchdog는 session script와 중복되지 않게 종료한다.
+
+```bash
+ssh pinky@192.168.4.1 'mkdir -p /home/pinky/dev_ws/wj/src'
+scp -r ros/pinky_control_interfaces ros/pinky_control_watchdog ros/pinky_control_navigation \
+  pinky@192.168.4.1:/home/pinky/dev_ws/wj/src/
+ssh pinky@192.168.4.1
+```
+
+로봇 shell에서 underlay를 먼저 source하고 의존성을 확인한 뒤 overlay를 빌드한다.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd /home/pinky/dev_ws/wj
+rosdep install --from-paths src/pinky_control_interfaces src/pinky_control_watchdog src/pinky_control_navigation \
+  -y --ignore-src --skip-keys ament_python
+colcon build --symlink-install --packages-select \
+  pinky_control_interfaces pinky_control_watchdog pinky_control_navigation
+source install/setup.bash
+ros2 pkg prefix pinky_control_navigation
+ros2 pkg prefix nav2_bt_navigator nav2_amcl nav2_map_server
+```
+
+`rosdep` 또는 `colcon`이 실패하면 주행 시험을 진행하지 않는다. 새 package가 install에 반영되기 전에는 session script의 `START_NAV2=1`이 실패하는 것이 정상이다.
+
+### 6.2 무이동 기동과 graph 확인
+
+터미널 A에서 hardware bringup을 유지한다.
+
+```bash
+unset ROS_LOCALHOST_ONLY
+export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+export ROS_DOMAIN_ID=13
+source /opt/ros/jazzy/setup.bash
+source /home/pinky/dev_ws/wj/install/setup.bash
+ros2 launch pinky_bringup bringup_robot.launch.xml
+```
+
+터미널 B에서는 기존 user service나 수동으로 켜 둔 중복 프로세스를 정리한 뒤 session script를 실행한다. 스크립트는 bringup을 시작·종료하지 않는다.
+
+```bash
+systemctl --user stop rosy-session-control.service 2>/dev/null || true
+START_NAV2=1 /home/pinky/start-pinky-robot2-session.sh
+```
+
+READY가 나오면 터미널 C에서 실제 이동 없이 다음을 확인한다.
+
+```bash
+unset ROS_LOCALHOST_ONLY
+export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+export ROS_DOMAIN_ID=13
+source /opt/ros/jazzy/setup.bash
+source /home/pinky/dev_ws/wj/install/setup.bash
+ros2 action list -t | grep navigate_to_pose
+ros2 lifecycle get /map_server
+ros2 lifecycle get /amcl
+ros2 lifecycle get /controller_server
+ros2 topic info /control/status -v
+ros2 topic info /control/nav_velocity -v
+ros2 topic info /cmd_vel -v
+ros2 run tf2_ros tf2_echo map base_footprint
+```
+
+AMCL은 초기 위치를 받기 전 `map→odom`을 만들지 않을 수 있다. `map→odom→base_footprint`가 확인되지 않으면 goal을 보내지 말고, 관제에서 시작점을 지정한 뒤 `위치 재설정(AMCL)`을 수행한다. Nav2 controller/recovery가 `/control/nav_velocity`로 출력되고 `/cmd_vel` publisher가 watchdog 하나인지 확인한다. `ros2 topic info -v`에서 publisher/subscriber QoS가 맞지 않으면 먼저 QoS를 수정한다.
+
+Nav2를 아직 준비하지 않고 영상·rosbridge·watchdog만 확인하려면 다음처럼 실행할 수 있다. 이 모드에서는 지도 자동 주행 버튼이 비활성화된다.
+
+```bash
+START_NAV2=0 /home/pinky/start-pinky-robot2-session.sh
+```
+
+### 6.3 로봇을 들어 옮긴 뒤 다시 시작하는 순서
+
+1. 전체 또는 `robot_2` 정지를 요청하고 `CONFIRMED`/속도 0을 확인한다. 물리적으로도 로봇을 잡을 수 있는 상태인지 확인한다.
+2. 로봇을 실제 현장의 새 위치에 놓고, 그 위치에 대응하는 지도 자유 셀을 `시작점 설정`으로 클릭·드래그한다. 우측 상단에서 시험하더라도 모서리 벽 셀 자체가 아니라 조금 안쪽의 바닥 셀을 선택한다.
+3. `위치 재설정(AMCL)`을 누른다. 이것은 `/initialpose`를 전달해 AMCL 추정 위치만 바꾸며 `map_260905`를 삭제하거나 다시 그리지 않는다.
+4. 정지 래치가 있으면 `robot_2 정지 해제`를 명시적으로 수행한다. 이전 목표는 자동 재개되지 않는다.
+5. 새 `도착점 설정`을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
+
+시작점·도착점이 점유/미상 셀이면 API가 `MAP_POINT_BLOCKED`로 거부한다. 시험 중 충돌·이상 상황이 다시 발생하면 같은 절차를 반복한다. `stop`은 활성 Nav2 goal을 취소하므로, 정지 해제만으로 로봇이 다시 움직이지 않아야 한다.

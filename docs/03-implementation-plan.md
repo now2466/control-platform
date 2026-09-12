@@ -11,7 +11,7 @@
 - 모든 제어는 서버에서 대상 ID, 권한, lease, 상태, 값 범위를 검증한다.
 - ROS 이름은 설정으로 매핑한다. mock은 ROS 없이 실행하며 ros 모드 장애를 mock으로 숨기지 않는다.
 - UI에 작업 중/완료/실패를 명시한다. 실제 수신 확인 없는 성공 표시는 금지한다.
-- T01~T10과 T12~T14가 최종 범위다. T11 영상 기록·동기 재생은 사용자 결정으로 제외한다.
+- T01~T10과 T12~T15가 최종 범위다. T11 영상 기록·동기 재생은 사용자 결정으로 제외한다.
 - 테스트는 위험한 상태 전이·좌표·중복 명령·끊김·기록 경계를 중심으로 작성한다.
 - 기존 웹 서버는 참고만 하고 새 패키지에서 구현한다. 하드웨어 드라이버 변경은 T12에서 실제 연결 조사 후 필요한 범위만 수행한다.
 
@@ -20,10 +20,18 @@
 아래 경로는 이 독립 저장소 루트 기준이며 새로 만들 파일이다.
 
 ```text
-ros/pinky_control_interfaces/ (T12 예정)
+ros/pinky_control_interfaces/ (T12)
   CMakeLists.txt, package.xml
   msg/ControlStatus.msg, msg/FollowStatus.msg
   srv/ControlCommand.srv, srv/FollowCommand.srv
+ros/pinky_control_watchdog/ (T12/T15)
+  package.xml, setup.py, setup.cfg
+  pinky_control_watchdog/manual_velocity_watchdog.py
+ros/pinky_control_navigation/ (T15)
+  package.xml, setup.py, setup.cfg
+  launch/robot_nav2.launch.py
+  map/map_260905.yaml, map/map_260905.pgm
+  params/nav2_params.yaml
 backend/
   package.xml, setup.py, setup.cfg, pyproject.toml, requirements.lock
   resource/pinky_control_center
@@ -182,7 +190,7 @@ class RobotAdapter(Protocol):
 - [x] 두 정적 mock 지도 중 활성 지도를 선택·저장하고, 이동·활성 편대/임무 중 지도 변경을 거부한다.
 - [x] ADMIN 전용 설정 화면과 GET/PUT·초기 위치 API를 제공한다.
 
-SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환 및 실제 ROS 설정 적용은 이 축소 범위에서 제외하며 T12의 실제 계약 확인 후 다룬다.
+SLAM create/save/reset은 이 정적 지도 운용의 범위가 아니다. `map_260905.world` 기반 지도와 AMCL 재현지화는 T15에서 별도로 추가한다. LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환 및 기타 실제 ROS 설정 적용은 해당 인터페이스 확인 후 다룬다.
 
 검증: `python -m pytest backend/tests/test_t09_settings.py -q`, 전체 backend/frontend test 및 frontend production build.
 
@@ -210,9 +218,10 @@ SLAM create/save/reset, LED/lamp/LCD/감정 장치, 로봇 등록·역할 교환
 - [x] `backend/pinky_control_center/resources/config/robots.ros.yaml`에 bridge endpoint/credentials/TLS/mapping과 고정 domain(`robot_1: 12`, `robot_2: 13`)을 기록하고 RobotAdapter를 두 개 구성해 rosbridge JSON 요청·feedback·결과를 연결한다. rosbridge 프로세스는 각 domain 환경으로 시작하며 관제 UI/API로 domain을 변경하지 않는다. `ros/pinky_control_interfaces`는 로봇 측 계약이 필요할 때만 유지한다.
 - [x] `/tf`·`/tf_static`과 odom을 수신해 map TF graph를 합성하고, 지도 pose·TF validity·궤적을 상태에 반영한다. 실제 namespaced topic과 `base_footprint` 경로 실측 검증은 남긴다.
 - [x] 정지 조건 뒤 초기 위치를 `{ns}/initialpose`로 발행하고 수동 입력을 `{ns}/control/manual_velocity`로 발행한다. 최종 cmd_vel은 직접 발행하지 않는다.
-- [x] `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 추가해 control status/command, 단일 cmd_vel 중재, stop 래치·watchdog을 구현했다. 실제 robot_2 workspace 설치와 저속 이동 시험은 T14 현장 gate로 남긴다.
+- [x] `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 추가해 control status/command, 단일 cmd_vel 중재, stop 래치·watchdog을 구현했다. 실제 robot_2 workspace 설치와 저속 이동 시험은 T15 현장 gate로 남긴다.
+- [x] watchdog에 Nav2 `NavigateToPose` action client와 `navigate/cancel_navigation` 제어를 추가했다. stop/reset_stop은 활성 goal을 취소하고 자동 재개하지 않는다. 실제 action server·AMCL·TF·저속 이동은 T15 현장 gate로 남긴다.
 - [x] compressed image 토픽을 rosbridge JSON/base64로 수신하고 quality/throttle/fragment를 설정한다. 단절·재연결·stale 전환과 두 로봇 데이터/제어 대상이 바뀌지 않는 contract test를 실행한다. 실제 토픽·FPS는 현장 검증이 남는다.
-- [ ] 무이동 상태에서 상태·영상·정지 응답을 먼저 시험한다. 현장 이동 시험 전에는 실물 속도 제어 enable을 열지 않는다.
+- [ ] 무이동 상태에서 상태·영상·정지 응답·Nav2 action server를 먼저 시험한다. 현장 이동 시험 전에는 실물 속도 제어 enable을 열지 않는다.
 
 검증 (워크스페이스 `/home/yoon/pinky`):
 
@@ -228,7 +237,7 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 파일: deployment 전체, runbook.md, launch/control_center.launch.py.
 
 - [x] 동일 출처 정적 UI/API/WS 프록시, TLS·세션 설정, worker 1개 서비스와 env 예제를 작성한다.
-- [x] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 적는다. 실제 ROS/Gazebo 실행은 현장 gate로 남긴다.
+- [x] runbook에 의존성/빌드/계정 생성/mock 실행/ROS 실행/정지/로그 위치/백업/복구 명령을 적는다. robot_2의 watchdog·정적 지도 Nav2 session과 수동 재현지화 절차도 포함한다. 실제 ROS/Gazebo 실행은 현장 gate로 남긴다.
 - [x] API 자동 시작과 server restart 후 자동 임무 재개 금지를 런북·mock 계약으로 명시한다. rosbridge lifecycle은 별도 ROS supervisor가 맡는다.
 - [x] 설정 오류/포트 충돌/ROS 미기동을 명확한 실패로 처리하고 고정 domain/별도 endpoint를 검증한다.
 
@@ -242,6 +251,29 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 - [ ] 지도+실시간 영상 2개 동시 부하로 p95/실제 FPS/메모리/큐를 측정한다.
 - [x] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 `acceptance-report.md`에 기록한다.
 - [ ] 실패 항목을 수정한 후 해당 검증을 재실행한다. 하드웨어 미검증은 NOT_RUN으로 남긴다.
+
+### T15 — 지도 클릭 단일 로봇 Nav2 주행·AMCL 재현지화 (R02/R06/R16) — 구현 완료, 실물 gate 대기
+
+파일: `backend/pinky_control_center/navigation_service.py`, `backend/pinky_control_center/api/navigation.py`, `frontend/src/MapPanel.tsx`, `frontend/src/App.tsx`, `ros/pinky_control_navigation/`, `ros/pinky_control_watchdog/pinky_control_watchdog/manual_velocity_watchdog.py`, `deployment/scripts/start-pinky-robot2-session.sh`, `backend/tests/test_t15_map_navigation.py`, `frontend/src/MapPanel.test.tsx`.
+
+- [x] 활성 정적 지도에서 시작점·도착점의 자유/미상 셀을 서버에서 재검증하고, lease·신선도·정지·편대·임무·capability gate를 적용한다.
+- [x] `위치 재설정(AMCL)`과 `시작점에서 도착점으로 이동` UI/API를 추가했다. 지도 클릭만으로 주행하지 않으며, 위치 재설정은 `/initialpose`만 발행한다.
+- [x] 시작점 `/initialpose` → `AUTO` → `NavigateToPose` 순서를 backend/watchdog에 연결하고, Nav2 출력은 `/control/nav_velocity`, 최종 `/cmd_vel`은 watchdog 단일 publisher로 구성했다.
+- [x] `map_260905.world`에서 동일한 `map_260905.pgm/.yaml`을 패키징하고, session script가 watchdog·AMCL·Nav2를 선택적으로 시작하도록 했다. `stop`/정지 해제 뒤 자동 재개하지 않는다.
+- [x] 로봇을 들어 옮긴 뒤 새 시작점으로 재현지화하는 mock/API/UI 테스트와 문서를 갱신했다.
+- [ ] robot_2에서 새 패키지를 `colcon build`하고 `/navigate_to_pose` action server·AMCL lifecycle·`map→odom→base_footprint` TF를 확인한다.
+- [ ] 실제 현장에서는 우측 상단 모서리 자체가 아닌 안쪽의 자유 셀을 시작점으로 선택해 저속 주행·정지·재설정·재주행을 검증한다. 충돌 위험 시 물리적으로 들어 옮기기 전에 정지 확인을 완료한다.
+
+검증:
+
+```bash
+cd backend && .venv/bin/python -m pytest tests/test_t15_map_navigation.py -q
+cd ../frontend && npm test -- --run src/MapPanel.test.tsx src/T05.test.tsx
+source /opt/ros/jazzy/setup.bash
+ros2 action list -t | grep navigate_to_pose
+ros2 lifecycle get /amcl
+ros2 run tf2_ros tf2_echo map base_footprint
+```
 
 ## 5. 인수 시나리오
 
@@ -275,24 +307,24 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 | 기반·화면 | T01~T04 | 5~7일 | 두 로봇 모의 지도·영상 대시보드 |
 | 제어·임무 | T05~T07 | 5~8일 | 정지·추종·단일/순찰 임무 |
 | 운영 기능 | T08~T10 | 4~6일 | 알림·설정·운용 이력 |
-| 실물·배포·인수 | T12~T14 | 7~11일 | 연동 보고서·실행 문서·인수 결과 |
+| 실물·배포·인수 | T12~T15 | 7~11일 | 연동 보고서·실행 문서·인수 결과 |
 
 T12의 인터페이스 조사는 T01 직후 시작해 로봇 담당에게 계약을 전달할 수 있다. 본격 ROS 연동은 mock 제어 검증 후 수행한다. MVP는 T01~T06, T08의 핵심 알림 및 T12의 해당 실물 연동을 통과한 상태이며, 전체 범위 완료와 구분한다.
 
 | 요구사항 | 구현 작업 |
 |---|---|
-| R01/R02/R03 | T01/T02/T03/T12 |
-| R04/R06/R08 | T06/T12 |
+| R01/R02/R03 | T01/T02/T03/T12/T15 |
+| R04/R06/R08 | T06/T12/T15 |
 | R05 | T04/T12 |
 | R07 | T07 |
 | R09/R10/R18 | T02/T05/T12 |
 | R11/R12 | T08/T12 |
 | R13 | T10 |
 | R14 | 범위 제외(T11) |
-| R15/R16/R17 | T09/T12 |
+| R15/R16/R17 | T09/T12/T15 |
 | R19 | T01 및 각 기능 mock 시나리오 |
 | N01/N02/N07/N08 | T03/T04/T14 |
-| N03/N06 | T05/T12/T14 |
+| N03/N06 | T05/T12/T14/T15 |
 | N04/N05 | T02/T07/T13/T14 |
 | N09 | T02/T13/T14 |
 | N10/N11 | T10/T14 |

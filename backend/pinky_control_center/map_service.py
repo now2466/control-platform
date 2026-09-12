@@ -20,6 +20,7 @@ class MapService:
         self.map_id = "mock_lab"
         self.version = self._metadata[self.map_id].version
         self._png = {map_id: self._make_png(map_id, metadata) for map_id, metadata in self._metadata.items()}
+        self._occupancy = {map_id: Image.open(io.BytesIO(png)).convert("L") for map_id, png in self._png.items()}
 
     def summaries(self) -> list[MapSummary]:
         return [MapSummary(map_id=item.map_id, name=item.name, version=item.version) for item in self._metadata.values()]
@@ -32,6 +33,23 @@ class MapService:
         if metadata is None or (version is not None and version != metadata.version):
             return None
         return self._png[map_id], f'"{metadata.map_id}:{metadata.version}"'
+
+    def is_free(self, map_id: str, x: float, y: float) -> bool:
+        """Check a map-frame point against the same occupancy raster as the UI."""
+        metadata = self.metadata(map_id)
+        image = self._occupancy.get(map_id)
+        if metadata is None or image is None:
+            return False
+        delta_x, delta_y = x - metadata.origin.x, y - metadata.origin.y
+        cosine, sine = math.cos(metadata.origin.yaw), math.sin(metadata.origin.yaw)
+        local_x = cosine * delta_x + sine * delta_y
+        local_y = -sine * delta_x + cosine * delta_y
+        column = math.floor(local_x / metadata.resolution)
+        row_from_bottom = math.floor(local_y / metadata.resolution)
+        row = metadata.height - 1 - row_from_bottom
+        if not (0 <= column < metadata.width and 0 <= row < metadata.height):
+            return False
+        return image.getpixel((column, row)) >= 250
 
     @staticmethod
     def _make_png(map_id: str, metadata: MapMetadata) -> bytes:

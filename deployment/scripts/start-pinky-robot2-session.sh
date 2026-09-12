@@ -10,6 +10,7 @@ set -Eeo pipefail
 PINKY_WS="${PINKY_WS:-/home/pinky/dev_ws/wj}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-13}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9091}"
+START_NAV2="${START_NAV2:-1}"
 CONFIG_DIR="$PINKY_WS/install/rosy_control/share/rosy_control/config"
 
 CAMERA_TOPIC="/camera/front"
@@ -20,6 +21,7 @@ camera_pid=""
 republisher_pid=""
 rosbridge_pid=""
 watchdog_pid=""
+nav2_pid=""
 cleanup_done=0
 camera_library_path=""
 
@@ -32,14 +34,14 @@ cleanup() {
   [[ "$cleanup_done" -eq 0 ]] || return
   cleanup_done=1
   set +e
-  for pid in "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid"; do
+  for pid in "$nav2_pid" "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid"; do
     if [[ -n "$pid" ]]; then
       # Each process is started in its own session so ros2run's child (for
       # example the Python rosbridge server) is stopped together with it.
       kill -INT -- "-$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null
     fi
   done
-  wait "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid" 2>/dev/null || true
+  wait "$nav2_pid" "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid" 2>/dev/null || true
 }
 
 wait_for_publisher() {
@@ -55,6 +57,26 @@ wait_for_publisher() {
     fi
     topic_info="$(timeout 5s ros2 topic info "$topic" 2>/dev/null || true)"
     if grep -Eq 'Publisher count: [1-9]' <<<"$topic_info"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_action_server() {
+  local action="$1"
+  local pid="$2"
+  local timeout_seconds="${3:-30}"
+  local attempt
+  local action_info
+
+  for ((attempt = 1; attempt <= timeout_seconds; attempt++)); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 1
+    fi
+    action_info="$(timeout 5s ros2 action list -t 2>/dev/null || true)"
+    if grep -Eq "^${action}[[:space:]]" <<<"$action_info"; then
       return 0
     fi
     sleep 1
@@ -93,6 +115,11 @@ ros2 pkg prefix rosy_control >/dev/null || fail "rosy_control package is not ava
 ros2 pkg prefix image_transport >/dev/null || fail "image_transport package is not available"
 ros2 pkg prefix rosbridge_server >/dev/null || fail "rosbridge_server package is not available"
 ros2 pkg prefix pinky_control_watchdog >/dev/null || fail "pinky_control_watchdog package is not available; build the control workspace first"
+if [[ "$START_NAV2" == "1" ]]; then
+  ros2 pkg prefix pinky_control_navigation >/dev/null || fail "pinky_control_navigation package is not available; build the control workspace first"
+elif [[ "$START_NAV2" != "0" ]]; then
+  fail "START_NAV2 must be 0 or 1"
+fi
 
 if systemctl --user is-active --quiet rosy-session-control.service; then
   echo "Stopping rosy-session-control.service to avoid duplicate camera nodes..."
@@ -120,6 +147,7 @@ setsid ros2 run pinky_control_watchdog manual_velocity_watchdog --ros-args \
   -p robot_id:=robot_2 \
   -p manual_topic:=/control/manual_velocity \
   -p nav_topic:=/control/nav_velocity \
+  -p navigate_action_name:=/navigate_to_pose \
   -p cmd_vel_topic:=/cmd_vel \
   -p status_topic:="$CONTROL_STATUS_TOPIC" \
   -p heartbeat_topic:=/control/heartbeat \
@@ -129,6 +157,17 @@ watchdog_pid=$!
 
 if ! wait_for_publisher "$CONTROL_STATUS_TOPIC" "$watchdog_pid" 15; then
   fail "control watchdog did not publish $CONTROL_STATUS_TOPIC within 15 seconds"
+fi
+
+if [[ "$START_NAV2" == "1" ]]; then
+  echo "Starting Pinky Nav2 on map_260905..."
+  setsid ros2 launch pinky_control_navigation robot_nav2.launch.py use_sim_time:=false &
+  nav2_pid=$!
+  if ! wait_for_action_server "/navigate_to_pose" "$nav2_pid" 60; then
+    fail "Nav2 did not expose /navigate_to_pose within 60 seconds"
+  fi
+else
+  echo "Nav2 is disabled (set START_NAV2=1 after building pinky_control_navigation)."
 fi
 
 echo "Starting Pinky camera publisher..."
@@ -159,7 +198,10 @@ echo "  rosbridge:     ws://0.0.0.0:$ROSBRIDGE_PORT"
 echo "  camera:        $CAMERA_TOPIC"
 echo "  compressed:     $COMPRESSED_TOPIC"
 echo "  control:       /control/manual_velocity -> /cmd_vel (watchdog)"
+echo "  navigation:    ${START_NAV2} (/navigate_to_pose -> /control/nav_velocity)"
 echo "Press Ctrl+C to stop this session. Hardware bringup is not stopped."
 
-wait -n "$rosbridge_pid" "$camera_pid" "$watchdog_pid" "$republisher_pid"
+session_pids=("$rosbridge_pid" "$camera_pid" "$watchdog_pid" "$republisher_pid")
+[[ -n "$nav2_pid" ]] && session_pids+=("$nav2_pid")
+wait -n "${session_pids[@]}"
 exit $?
