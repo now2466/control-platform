@@ -148,4 +148,12 @@ async def teleop(websocket: WebSocket) -> None:
             except PermissionError:
                 await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"}); continue
             result = service.ingest(robot_id, seq, linear, angular, limits.max_linear_mps, limits.max_angular_rps)
+            if result == "ACCEPTED":
+                publish = getattr(websocket.app.state.adapter, "publish_manual_velocity", None)
+                if publish is not None:
+                    accepted = await publish(robot_id, linear, angular)
+                    if not accepted.accepted:
+                        service.protective_stop(robot_id)
+                        await websocket.send_json({"type": "rejected", "reason_code": accepted.reason_code or "ROSBRIDGE_WRITE_FAILED"})
+                        continue
             await websocket.send_json({"type": result.lower(), "seq": seq})

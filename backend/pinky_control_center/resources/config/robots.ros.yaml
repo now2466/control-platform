@@ -16,6 +16,8 @@ robots:
       path: /robot_1/plan
       manual_velocity: /robot_1/control/manual_velocity
       initial_pose: /robot_1/initialpose
+      tf: /tf
+      tf_static: /tf_static
     services:
       control_command: /robot_1/control/command
       control_command_type: pinky_control_interfaces/srv/ControlCommand
@@ -38,6 +40,8 @@ robots:
       path: /robot_2/plan
       manual_velocity: /robot_2/control/manual_velocity
       initial_pose: /robot_2/initialpose
+      tf: /tf
+      tf_static: /tf_static
     services:
       control_command: /robot_2/control/command
       control_command_type: pinky_control_interfaces/srv/ControlCommand

@@ -19,7 +19,9 @@
 
 `wss://` endpoint에는 security mapping의 `ca_cert_env`, `client_cert_env`/`client_key_env`, `authorization_token_env`를 선택적으로 지정할 수 있다. YAML에는 secret이나 certificate contents가 아닌 environment variable 이름만 저장한다. TLS verification은 기본 활성이고 client certificate/key는 쌍으로만 허용한다.
 
-현재 `pinky_control_interfaces`의 `ControlCommand`/`FollowCommand` 계약은 실제 로봇 저장소에 없으므로 기본 설정의 `control_available`/`follow_available`은 false다. adapter는 직접 `/cmd_vel`을 발행하지 않으며 이 상태의 제어 요청은 `UNSUPPORTED`다.
+`RosbridgeAdapter`는 `/tf`·`/tf_static`과 odom을 함께 받아 `map → odom → base`를 2D로 합성하고, 검증된 경우에만 공통 map 좌표로 상태를 노출한다. 초기 위치는 정지 조건을 통과한 뒤 `{ns}/initialpose`에 `PoseWithCovarianceStamped`로 발행하며, 수동 속도는 `{ns}/control/manual_velocity` 중재 토픽으로만 발행한다. 최종 `/cmd_vel`은 로봇 측 안전 중재기가 담당한다.
+
+현재 `pinky_control_interfaces`의 `ControlCommand`/`FollowCommand` 서버가 실제 로봇 저장소에 설치되어 있고 필드 계약이 일치하는 경우에만 `control_available`/`follow_available`을 true로 바꾼다. `ControlCommand` 요청은 `command_id`, `operation`, `parameters_json` 필드를 사용한다. 서버가 없거나 계약이 확인되지 않은 상태의 주행·편대 제어 요청은 `UNSUPPORTED`다.
 
 ## 검증
 

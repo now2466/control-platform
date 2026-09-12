@@ -57,6 +57,15 @@ class _PendingServiceCall:
     future: asyncio.Future[CommandAcceptance]
 
 
+@dataclass(frozen=True)
+class _Transform2D:
+    """Planar part of a ROS transform, expressed as parent -> child."""
+
+    x: float
+    y: float
+    yaw: float
+
+
 class RosbridgeAdapter:
     """Translate rosbridge JSON into the existing adapter contract.
 
@@ -93,6 +102,8 @@ class RosbridgeAdapter:
         self._pose_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
         self._battery_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
         self._camera_received_at: dict[RobotId, datetime | None] = {"robot_1": None, "robot_2": None}
+        self._transforms: dict[RobotId, dict[tuple[str, str], _Transform2D]] = {"robot_1": {}, "robot_2": {}}
+        self._odom_frames: dict[RobotId, tuple[str, str] | None] = {"robot_1": None, "robot_2": None}
 
     def _blank_state(self, robot: RosbridgeRobotConfig) -> RobotState:
         return RobotState(
@@ -196,6 +207,8 @@ class RosbridgeAdapter:
             (topics.battery_voltage, "std_msgs/msg/Float32", 0),
             (topics.control_status, None, 0),
             (topics.camera_compressed, "sensor_msgs/msg/CompressedImage", robot.camera.throttle_rate_ms),
+            (topics.tf, "tf2_msgs/msg/TFMessage", 0),
+            (topics.tf_static, "tf2_msgs/msg/TFMessage", 0),
         )
         for topic, message_type, throttle_rate in subscriptions:
             payload: dict[str, object] = {"op": "subscribe", "topic": topic, "queue_length": 1}
@@ -221,6 +234,8 @@ class RosbridgeAdapter:
         self._pose_received_at[robot_id] = None
         self._battery_received_at[robot_id] = None
         self._camera_received_at[robot_id] = None
+        self._transforms[robot_id].clear()
+        self._odom_frames[robot_id] = None
         current = self._states[robot_id]
         self._states[robot_id] = current.model_copy(update={
             "connection": Connection.OFFLINE, "received_at": None,
@@ -327,6 +342,10 @@ class RosbridgeAdapter:
         if topic == robot.topics.odom:
             self._update_odom(robot_id, message, now)
             await self._emit("robot_state", robot_id, self._states[robot_id].model_dump(mode="json"), now)
+        elif topic in {robot.topics.tf, robot.topics.tf_static}:
+            self._update_tf(robot_id, message)
+            self._refresh_map_pose(robot_id)
+            await self._emit("robot_state", robot_id, self._states[robot_id].model_dump(mode="json"), now)
         elif topic in {robot.topics.battery_percent, robot.topics.battery_voltage}:
             self._update_battery(robot_id, topic, message, now)
             await self._emit("robot_state", robot_id, self._states[robot_id].model_dump(mode="json"), now)
@@ -356,8 +375,14 @@ class RosbridgeAdapter:
             pose = Pose(x=float(position["x"]), y=float(position["y"]), yaw=_yaw(orientation), frame_id=_frame_id(message, "odom"))
         except (KeyError, TypeError, ValueError):
             return
-        # Odom is deliberately not presented as a common-map pose.  A verified
-        # map->odom TF subscription is required before tf_valid can become true.
+        frame_id = _frame_id(message, "odom")
+        child_frame = message.get("child_frame_id")
+        if isinstance(child_frame, str) and child_frame:
+            edge = (_frame(frame_id), _frame(child_frame))
+            self._odom_frames[robot_id] = edge
+            self._transforms[robot_id][edge] = _Transform2D(
+                pose.x, pose.y, pose.yaw
+            )
         self._states[robot_id] = self._states[robot_id].model_copy(update={
             "connection": Connection.ONLINE, "received_at": now, "pose": pose,
             "pose_freshness": Freshness.FRESH, "linear_mps": _number(linear.get("x")),
@@ -365,6 +390,48 @@ class RosbridgeAdapter:
             "tf_reason_code": "MAP_TF_UNVERIFIED",
         })
         self._pose_received_at[robot_id] = now
+        self._refresh_map_pose(robot_id)
+
+    def _update_tf(self, robot_id: RobotId, message: dict[str, object]) -> None:
+        transforms = message.get("transforms")
+        if not isinstance(transforms, list):
+            return
+        for item in transforms:
+            if not isinstance(item, dict):
+                continue
+            header = _nested_dict(item, "header")
+            parent = header.get("frame_id")
+            child = item.get("child_frame_id")
+            transform = _nested_dict(item, "transform")
+            translation = _nested_dict(transform, "translation")
+            rotation = _nested_dict(transform, "rotation")
+            if not isinstance(parent, str) or not parent or not isinstance(child, str) or not child:
+                continue
+            x, y = _number(translation.get("x")), _number(translation.get("y"))
+            if x is None or y is None:
+                continue
+            try:
+                yaw = _yaw(rotation)
+            except ValueError:
+                continue
+            self._transforms[robot_id][(_frame(parent), _frame(child))] = _Transform2D(x, y, yaw)
+
+    def _refresh_map_pose(self, robot_id: RobotId) -> None:
+        current = self._states[robot_id]
+        if current.pose is None:
+            return
+        target = self._odom_frames[robot_id][1] if self._odom_frames[robot_id] else _frame("base_footprint")
+        transform = _lookup_transform(self._transforms[robot_id], "map", target)
+        if transform is None:
+            self._states[robot_id] = current.model_copy(update={
+                "tf_valid": False, "tf_reason_code": "MAP_TF_UNVERIFIED",
+            })
+            return
+        updated_trail = [*current.trail, MapPoint(x=transform.x, y=transform.y)][-200:]
+        self._states[robot_id] = current.model_copy(update={
+            "pose": Pose(x=transform.x, y=transform.y, yaw=transform.yaw, frame_id="map"),
+            "tf_valid": True, "tf_reason_code": None, "trail": updated_trail,
+        })
 
     def _update_battery(self, robot_id: RobotId, topic: str, message: dict[str, object], now: datetime) -> None:
         value = _number(message.get("data"))
@@ -499,6 +566,8 @@ class RosbridgeAdapter:
         socket = self._sockets.get(robot_id)
         if socket is None:
             return CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_OFFLINE")
+        if command.operation == "initial_pose":
+            return await self._publish_initial_pose(robot_id, socket, command)
         service = robot.services
         if command.operation.startswith("follow_"):
             if not service.follow_available or not service.follow_command or not service.follow_command_type:
@@ -517,7 +586,7 @@ class RosbridgeAdapter:
         request = {
             "op": "call_service", "id": call_id, "service": endpoint,
             "type": service_type,
-            "args": {"command_id": str(command.command_id), "operation": command.operation, "parameters": command.parameters},
+            "args": self._service_args(service_type, command),
         }
         try:
             await socket.send(json.dumps(request, separators=(",", ":")))
@@ -528,6 +597,63 @@ class RosbridgeAdapter:
             return CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_WRITE_FAILED")
         finally:
             self._service_calls.pop(call_id, None)
+
+    @staticmethod
+    def _service_args(service_type: str, command: CommandRequest) -> dict[str, object]:
+        if service_type.endswith("/ControlCommand"):
+            return {
+                "command_id": str(command.command_id),
+                "operation": command.operation,
+                "parameters_json": json.dumps(command.parameters, separators=(",", ":")),
+            }
+        return {
+            "command_id": str(command.command_id),
+            "operation": command.operation,
+            "parameters": command.parameters,
+        }
+
+    async def _publish_initial_pose(self, robot_id: RobotId, socket: Any, command: CommandRequest) -> CommandAcceptance:
+        topic = self._by_id[robot_id].topics.initial_pose
+        if not topic:
+            return CommandAcceptance(accepted=False, reason_code="UNSUPPORTED")
+        try:
+            pose = Pose.model_validate(command.parameters["pose"])
+        except (KeyError, TypeError, ValueError):
+            return CommandAcceptance(accepted=False, reason_code="INVALID_VALUE")
+        message = {
+            "header": {"frame_id": pose.frame_id},
+            "pose": {
+                "pose": {
+                    "position": {"x": pose.x, "y": pose.y, "z": 0.0},
+                    "orientation": {"x": 0.0, "y": 0.0, "z": math.sin(pose.yaw / 2), "w": math.cos(pose.yaw / 2)},
+                },
+                "covariance": [0.0] * 36,
+            },
+        }
+        try:
+            await socket.send(json.dumps({"op": "publish", "topic": topic, "type": "geometry_msgs/msg/PoseWithCovarianceStamped", "msg": message}, separators=(",", ":")))
+        except Exception:
+            return CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_WRITE_FAILED")
+        await self._emit("command", robot_id, {
+            "command_id": str(command.command_id), "state": "SUCCEEDED", "reason_code": None,
+            "operation": command.operation, "parameters": command.parameters,
+        }, self._clock())
+        return CommandAcceptance(accepted=True)
+
+    async def publish_manual_velocity(self, robot_id: RobotId, linear_mps: float, angular_rps: float) -> CommandAcceptance:
+        """Publish only to the robot-side safety mediator input, never /cmd_vel."""
+        robot = self._by_id[robot_id]
+        topic, socket = robot.topics.manual_velocity, self._sockets.get(robot_id)
+        if not topic:
+            return CommandAcceptance(accepted=False, reason_code="UNSUPPORTED")
+        if socket is None:
+            return CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_OFFLINE")
+        message = {"header": {}, "twist": {"linear": {"x": linear_mps, "y": 0.0, "z": 0.0}, "angular": {"x": 0.0, "y": 0.0, "z": angular_rps}}}
+        try:
+            await socket.send(json.dumps({"op": "publish", "topic": topic, "type": "geometry_msgs/msg/TwistStamped", "msg": message}, separators=(",", ":")))
+        except Exception:
+            return CommandAcceptance(accepted=False, reason_code="ROSBRIDGE_WRITE_FAILED")
+        return CommandAcceptance(accepted=True)
 
     async def apply_settings(self, values: dict[str, object]) -> bool:
         """ROS parameter/settings application has no confirmed T12 contract yet."""
@@ -616,6 +742,57 @@ def _yaw(orientation: dict[str, object]) -> float:
 def _frame_id(message: dict[str, object], fallback: str) -> str:
     value = _nested_dict(message, "header").get("frame_id")
     return value if isinstance(value, str) and value else fallback
+
+
+def _frame(value: str) -> str:
+    """ROS frame IDs are compared without the legacy leading slash."""
+    return value.lstrip("/")
+
+
+def _compose(parent_to_middle: _Transform2D, middle_to_child: _Transform2D) -> _Transform2D:
+    cosine, sine = math.cos(parent_to_middle.yaw), math.sin(parent_to_middle.yaw)
+    return _Transform2D(
+        parent_to_middle.x + cosine * middle_to_child.x - sine * middle_to_child.y,
+        parent_to_middle.y + sine * middle_to_child.x + cosine * middle_to_child.y,
+        _normalize_yaw(parent_to_middle.yaw + middle_to_child.yaw),
+    )
+
+
+def _inverse(transform: _Transform2D) -> _Transform2D:
+    cosine, sine = math.cos(transform.yaw), math.sin(transform.yaw)
+    return _Transform2D(
+        -cosine * transform.x - sine * transform.y,
+        sine * transform.x - cosine * transform.y,
+        _normalize_yaw(-transform.yaw),
+    )
+
+
+def _lookup_transform(transforms: dict[tuple[str, str], _Transform2D], source: str, target: str) -> _Transform2D | None:
+    """Find and compose a short TF graph path from source to target."""
+    source, target = _frame(source), _frame(target)
+    if source == target:
+        return _Transform2D(0.0, 0.0, 0.0)
+    graph: dict[str, list[tuple[str, _Transform2D]]] = {}
+    for (parent, child), transform in transforms.items():
+        graph.setdefault(parent, []).append((child, transform))
+        graph.setdefault(child, []).append((parent, _inverse(transform)))
+    queue: list[tuple[str, _Transform2D]] = [(source, _Transform2D(0.0, 0.0, 0.0))]
+    visited = {source}
+    while queue:
+        frame, accumulated = queue.pop(0)
+        for neighbor, edge in graph.get(frame, []):
+            if neighbor in visited:
+                continue
+            composed = _compose(accumulated, edge)
+            if neighbor == target:
+                return composed
+            visited.add(neighbor)
+            queue.append((neighbor, composed))
+    return None
+
+
+def _normalize_yaw(value: float) -> float:
+    return math.atan2(math.sin(value), math.cos(value))
 
 
 def _ros_stamp(stamp: dict[str, object]) -> datetime | None:

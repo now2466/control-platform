@@ -57,6 +57,8 @@ class RosbridgeTopics(BaseModel):
     path: str | None = Field(default=None, pattern=r"^/")
     manual_velocity: str | None = Field(default=None, pattern=r"^/")
     initial_pose: str | None = Field(default=None, pattern=r"^/")
+    tf: str = Field(default="/tf", pattern=r"^/")
+    tf_static: str = Field(default="/tf_static", pattern=r"^/")
 
 
 class RosbridgeServices(BaseModel):

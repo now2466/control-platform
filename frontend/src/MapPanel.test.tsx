@@ -24,8 +24,9 @@ test('follow centers selected pose and click-drag creates a non-dispatched previ
   const svg = document.querySelector('svg')!
   vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 200, height: 200, top: 0, left: 0, bottom: 200, right: 200, toJSON: () => ({}) })
   fireEvent.click(screen.getByText('선택 따라보기'))
-  fireEvent.pointerDown(svg, { clientX: 120, clientY: 100 })
-  fireEvent.pointerUp(svg, { clientX: 160, clientY: 100 }); fireEvent.click(svg, { clientX: 160, clientY: 100 })
+  const inputLayer = document.querySelector('.map-input-layer')!
+  fireEvent.pointerDown(inputLayer, { clientX: 120, clientY: 100 })
+  fireEvent.pointerUp(inputLayer, { clientX: 160, clientY: 100 }); fireEvent.click(inputLayer, { clientX: 160, clientY: 100 })
   expect(document.querySelectorAll('.goal-preview').length).toBe(1)
 })
 
@@ -37,10 +38,11 @@ test('map selection buttons assign a start pose and destination, and reset clear
   const svg = document.querySelector('svg')!
   vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 542, height: 252, top: 0, left: 0, bottom: 252, right: 542, toJSON: () => ({}) })
   fireEvent.click(screen.getByRole('button', { name: '시작점 설정' }))
-  fireEvent.pointerDown(svg, { clientX: 100, clientY: 100 }); fireEvent.pointerUp(svg, { clientX: 120, clientY: 100 }); fireEvent.click(svg, { clientX: 120, clientY: 100 })
+  const inputLayer = document.querySelector('.map-input-layer')!
+  fireEvent.pointerDown(inputLayer, { clientX: 100, clientY: 100 }); fireEvent.pointerUp(inputLayer, { clientX: 120, clientY: 100 }); fireEvent.click(inputLayer, { clientX: 120, clientY: 100 })
   expect(onInitialPoseChange).toHaveBeenCalledWith(expect.objectContaining({ frame_id: 'map' }))
   fireEvent.click(screen.getByRole('button', { name: '도착점 설정' }))
-  fireEvent.pointerDown(svg, { clientX: 300, clientY: 100 }); fireEvent.pointerUp(svg, { clientX: 320, clientY: 100 }); fireEvent.click(svg, { clientX: 320, clientY: 100 })
+  fireEvent.pointerDown(inputLayer, { clientX: 300, clientY: 100 }); fireEvent.pointerUp(inputLayer, { clientX: 320, clientY: 100 }); fireEvent.click(inputLayer, { clientX: 320, clientY: 100 })
   expect(onGoalChange).toHaveBeenCalledWith(expect.objectContaining({ frame_id: 'map' }))
   fireEvent.click(screen.getByRole('button', { name: '설정 초기화' }))
   expect(onInitialPoseChange).toHaveBeenLastCalledWith(null)

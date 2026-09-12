@@ -83,6 +83,7 @@ class SettingsService:
         return (
             robot.connection == Connection.ONLINE
             and robot.pose_freshness.value == "FRESH"
+            and robot.tf_valid
             and robot.mode in {RobotMode.IDLE, RobotMode.STOPPED}
             and robot.stop_latched is False
             and robot.linear_mps is not None and abs(robot.linear_mps) <= 0.001

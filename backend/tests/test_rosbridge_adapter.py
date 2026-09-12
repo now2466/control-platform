@@ -120,6 +120,51 @@ def test_rosbridge_decodes_compressed_camera_and_never_treats_odom_as_map_pose()
     asyncio.run(exercise())
 
 
+def test_rosbridge_composes_map_tf_with_odom_and_exposes_map_pose() -> None:
+    async def exercise() -> None:
+        adapter = RosbridgeAdapter(load_ros_config())
+        await adapter.handle_publish("robot_1", "/robot_1/odom", {
+            "header": {"frame_id": "odom"}, "child_frame_id": "base_footprint",
+            "pose": {"pose": {"position": {"x": 0.5, "y": 0.0}, "orientation": {"x": 0, "y": 0, "z": 0, "w": 1}}},
+            "twist": {"twist": {"linear": {"x": 0}, "angular": {"z": 0}}},
+        })
+        await adapter.handle_publish("robot_1", "/tf", {"transforms": [{
+            "header": {"frame_id": "map"}, "child_frame_id": "odom",
+            "transform": {"translation": {"x": 1.0, "y": 2.0}, "rotation": {"x": 0, "y": 0, "z": 0, "w": 1}},
+        }]})
+        state = adapter.snapshot().robots[0]
+        assert state.pose is not None
+        assert state.pose.model_dump() == {"x": 1.5, "y": 2.0, "yaw": 0.0, "frame_id": "map"}
+        assert state.tf_valid is True and state.tf_reason_code is None
+
+    asyncio.run(exercise())
+
+
+def test_rosbridge_publishes_initial_pose_and_manual_velocity_to_mediator_topics() -> None:
+    async def exercise() -> None:
+        sockets = {"ws://robot-1.local:9090": FakeSocket(), "ws://robot-2.local:9091": FakeSocket()}
+
+        async def connect(url: str, **_kwargs):
+            return sockets[url]
+
+        adapter = RosbridgeAdapter(load_ros_config(), connect_factory=connect)
+        await adapter.connect()
+        await asyncio.sleep(0)
+        initial = await adapter.execute(CommandRequest(command_id=uuid4(), robot_id="robot_1", operation="initial_pose", parameters={"pose": {"x": 1.0, "y": 2.0, "yaw": 0.5, "frame_id": "map"}}))
+        velocity = await adapter.publish_manual_velocity("robot_1", 0.1, 0.2)
+        assert initial.accepted and velocity.accepted
+        sent = sockets["ws://robot-1.local:9090"].sent
+        initial_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/robot_1/initialpose")
+        assert initial_message["type"] == "geometry_msgs/msg/PoseWithCovarianceStamped"
+        assert initial_message["msg"]["pose"]["pose"]["position"]["x"] == 1.0
+        velocity_message = next(item for item in sent if item.get("op") == "publish" and item.get("topic") == "/robot_1/control/manual_velocity")
+        assert velocity_message["type"] == "geometry_msgs/msg/TwistStamped"
+        assert velocity_message["msg"]["twist"]["linear"]["x"] == 0.1
+        await adapter.close()
+
+    asyncio.run(exercise())
+
+
 def test_ros_mode_starts_in_observation_mode_without_applying_mock_settings(tmp_path) -> None:
     # Unreachable deployment endpoints must not prevent the API from exposing
     # its stale/offline state or cause a mock settings application to be claimed.
