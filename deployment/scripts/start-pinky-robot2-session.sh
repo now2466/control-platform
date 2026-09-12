@@ -19,16 +19,7 @@ camera_pid=""
 republisher_pid=""
 rosbridge_pid=""
 cleanup_done=0
-
-camera_library_path="${PINKY_CAMERA_LD_LIBRARY_PATH:-${LD_LIBRARY_PATH:-}}"
-
-if [[ -f /usr/local/lib/aarch64-linux-gnu/libpisp.so.1 ]]; then
-  # camera_detect_node uses the Raspberry Pi libcamera 0.3.x Python stack.
-  # ROS Jazzy also ships libpisp, but its ABI is not compatible with the
-  # /usr/local libcamera IPA module on this robot. Prefer the matching local
-  # camera libraries for this process only.
-  camera_library_path="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:$camera_library_path"
-fi
+camera_library_path=""
 
 fail() {
   echo "ERROR: $*" >&2
@@ -76,6 +67,15 @@ source "$PINKY_WS/install/setup.bash"
 # ROS setup scripts legitimately read variables that may not exist yet.
 # Enable nounset only after both underlay and overlay have been sourced.
 set -u
+
+camera_library_path="${PINKY_CAMERA_LD_LIBRARY_PATH:-${LD_LIBRARY_PATH:-}}"
+if [[ -f /usr/local/lib/aarch64-linux-gnu/libpisp.so.1 ]]; then
+  # camera_detect_node uses the Raspberry Pi libcamera 0.3.x Python stack.
+  # ROS Jazzy also ships libpisp, but its ABI is not compatible with the
+  # /usr/local libcamera IPA module on this robot. Prefer the matching local
+  # camera libraries for this process only while retaining the ROS paths.
+  camera_library_path="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:$camera_library_path"
+fi
 
 unset ROS_LOCALHOST_ONLY
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
