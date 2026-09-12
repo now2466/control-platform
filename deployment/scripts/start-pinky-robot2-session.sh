@@ -124,7 +124,7 @@ setsid ros2 run image_transport republish raw compressed --ros-args \
   -p in_transport:=raw \
   -p out_transport:=compressed \
   -r in:="$CAMERA_TOPIC" \
-  -r out:=/camera/image_raw &
+  -r out/compressed:="$COMPRESSED_TOPIC" &
 republisher_pid=$!
 
 if ! wait_for_publisher "$COMPRESSED_TOPIC" "$republisher_pid" 30; then
