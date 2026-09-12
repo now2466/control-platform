@@ -2,7 +2,7 @@
 
 작성일: 2026-09-12  ·  기준: `dev`  ·  영상 녹화/재생(T11): 제외
 
-이 문서는 mock에서 재현 가능한 수용 증거와 ROS/Gazebo 현장 검증을 분리해 기록한다. `PASS`는 실행 증거가 저장된 항목, `FAIL`은 assertion 또는 계약 위반, `NOT_RUN`은 ROS·하드웨어 전제가 없어 실행하지 않은 항목이다.
+이 문서는 mock에서 재현 가능한 수용 증거와 ROS/Gazebo 현장 검증을 분리해 기록한다. `PASS`는 실행 증거가 저장된 항목, `PARTIAL`은 요구 증거 중 일부만 확인한 항목, `FAIL`은 assertion 또는 계약 위반, `NOT_RUN`은 ROS·하드웨어 전제가 없어 실행하지 않은 항목이다.
 
 ## Mock smoke
 
@@ -32,15 +32,15 @@ deployment/scripts/acceptance.sh
 | 요구사항/시험 | 상태 | 필요한 증거 |
 |---|---|---|
 | robot_1 domain 12 / bridge 9090 | NOT_RUN | rosbridge 로그, `ros2 topic list`, 연결 상태 |
-| robot_2 domain 13 / bridge 9091 | NOT_RUN | rosbridge 로그, `ros2 topic list`, 연결 상태 |
+| robot_2 domain 13 / bridge 9091 | PASS | 2026-09-12 rosbridge client 연결, `/odom`·배터리·TF·카메라 구독 및 웹 실영상 확인 |
 | 두 namespace의 TF 경로와 공통 map 좌표 | NOT_RUN | `tf2_tools view_frames`, 시간 동기 상태 |
 | compressed camera topic 매핑·두 스트림·실제 FPS/p95 | NOT_RUN | 실제 `CompressedImage` topic/변환 확인, 10분 측정 CSV/스크린샷 |
 | control/follow 수락·결과·재연결 | NOT_RUN | command_id 로그와 adapter contract test |
 | stop latch·watchdog·최종 cmd_vel 단일 중재 | NOT_RUN | 로봇 측 출력 0 및 래치 증거 |
 | robot_2 control/watchdog/navigation 패키지 build | PASS | 2026-09-12 `/home/pinky/dev_ws/wj`에서 3개 패키지 `colcon build` 통과 |
-| `/navigate_to_pose` action·AMCL lifecycle·정적 map server | NOT_RUN | `ros2 action list -t`, lifecycle 상태, map topic |
-| `map→odom→base_footprint` 및 라이다 costmap 반영 | NOT_RUN | `tf2_echo`, local/global costmap 및 `/scan` QoS |
-| 지도 시작점→AMCL→AUTO→목표 저속 주행 | NOT_RUN | 무이동 수락 로그와 물리 정지/재배치 재시험 기록 |
+| `/navigate_to_pose` action·AMCL lifecycle·정적 map server | PASS | 2026-09-12 action server 1개, AMCL/map/planner/controller active 및 마지막 goal status 4 `SUCCEEDED` 확인 |
+| `map→odom→base_footprint` 및 라이다 costmap 반영 | PARTIAL | 갱신되는 TF와 `/scan` publisher 1개·약 10Hz 확인. 실제 장애물 costmap 반영은 미확인 |
+| 지도 시작점→AMCL→AUTO→목표 저속 주행 | PARTIAL | 실제 이동과 action 성공 확인. 0.25m 허용오차로 0.22m 조기 성공하여 0.08m/0.17rad로 조정, 반복 정밀도 시험 필요 |
 | Gazebo 무이동 상태→개별/전체 정지 | NOT_RUN | rosbag/로그, command 결과 |
 | 두 Gazebo 인스턴스 spawn 위치 분리 | NOT_RUN | x/y spawn 인자를 지원하는 별도 world 또는 launch 수정. 현재 기본 위치 중첩 가능 |
 | 1시간 지도+영상 RSS/큐/N01~N03 | NOT_RUN | 측정값, 호스트 사양, 시계 동기 상태 |

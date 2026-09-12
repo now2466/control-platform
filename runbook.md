@@ -118,6 +118,8 @@ source /opt/ros/jazzy/setup.bash
 
 이 절차는 `robot_2`, ROS_DOMAIN_ID `13`, 로봇 주소 `192.168.4.1`인 현재 시험 구성을 기준으로 한다. `robot_1` domain 12와는 별도 rosbridge를 사용한다. 아래 절차를 수행해도 실제 이동 명령은 현장 담당자가 안전을 확인한 뒤 직접 실행해야 한다.
 
+현장 클릭 목표의 Nav2 도달 허용오차는 평면 0.08m, 방향 0.17rad(약 10도)다. 변경 전 0.25m 설정에서는 목표 약 0.22m 전에 정상 성공 처리된 사례가 있으므로, 시험 기록에는 클릭 목표와 최종 `map→base_footprint` pose의 거리·방향 오차를 함께 남긴다.
+
 ### 6.1 로봇 측 패키지 설치·빌드
 
 로봇의 기존 bringup/session 프로세스를 확인한 뒤, 소스 패키지를 명시된 workspace에 복사한다. 기존 bringup은 유지할 수 있지만, 이전에 별도로 실행한 camera publisher·image republisher·rosbridge·watchdog는 session script와 중복되지 않게 종료한다.

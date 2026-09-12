@@ -29,8 +29,12 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 robot_2 session script는 `START_NAV2=1`일 때 watchdog 뒤 SLLidar의 `/start_motor`를 호출하고 `pinky_control_navigation`을 시작한 뒤 `/navigate_to_pose` action server가 보일 때까지 기다린다. navigation lifecycle gate는 `map→base_footprint` TF가 확인된 뒤에만 lifecycle manager startup을 호출하고 실패 시 재시도한다. Nav2 controller/recovery는 `/control/nav_velocity`로 remap되고 최종 `/cmd_vel`은 watchdog 하나만 발행한다. `stop`, `reset_stop`, `cancel_navigation`은 활성 goal을 취소하며 자동 재개하지 않는다.
 
-mock API/UI와 launch/package syntax, robot_2의 세 패키지 build는 검증했다. 다음은 실제 로봇에서 아직 실행하지 않은 gate다: map server/AMCL/Nav2 lifecycle active, 실제 `map→odom→base_footprint` TF, 라이다 costmap 장애물 반영, action acceptance/result, 저속 이동·정지·수동 재배치 후 재현지화.
+mock API/UI와 launch/package syntax, robot_2의 세 패키지 build는 검증했다. 실제 로봇에서는 map server/AMCL/Nav2 lifecycle active, `map→odom→base_footprint` TF, action acceptance/result와 1차 저속 이동까지 확인했다. 남은 gate는 라이다 costmap 장애물 반영, 조정된 허용오차의 반복 도착 정밀도, 정지 및 수동 재배치 후 재현지화다.
+
+robot_2 1차 현장 주행에서 `/scan` 약 10Hz, AMCL·Nav2 lifecycle active, `map→odom→base_footprint` TF, `/navigate_to_pose` action acceptance와 실제 이동을 확인했다. 마지막 action은 `SUCCEEDED`였지만 목표 `(1.20, -0.04)` 대비 정지 pose가 약 `(1.20, 0.18)`로 0.22m 일찍 멈췄다. 이는 `general_goal_checker.xy_goal_tolerance=0.25` 안에 들어온 정상 판정이므로 현장 클릭 주행 설정을 `xy_goal_tolerance=0.08`, `yaw_goal_tolerance=0.17`로 강화했다. 조정값의 반복 도착 정밀도와 장애물 회피는 아직 현장 gate다.
+
+허용오차 변경 배포 시 `/home/pinky/dev_ws/wj`의 전체 `rosdep install --from-paths src -y --ignore-src`는 기존 `lcd_control`·`pinky_web`의 사내 패키지 키와 두 제어 패키지의 `ament_python` rosdep 키를 해석하지 못해 실패했다. 새 의존성이 없는 YAML 변경이므로 `colcon build --packages-select pinky_control_navigation`으로 대상 패키지 빌드를 완료했으며, rosdep 선언 정리는 별도 유지보수 항목이다.
 
 ## 실행하지 않은 현장 검증
 
-robot_2 현장 시험에서는 호환 라이브러리 우선 적용 후 domain 13의 카메라가 `320x240 @ 8Hz`로 초기화되는 것을 확인했다. `/camera/front` publisher와 raw-to-compressed republisher, 압축 토픽의 rosbridge 구독은 세션 런처 통합 시험에서 확인했다. 단, 다중 publisher가 남아 있으면 카메라 장치 충돌이 발생하므로 `deployment/scripts/start-pinky-robot2-session.sh`가 중복 camera/republisher/rosbridge/watchdog를 거부하고, 실패 시 자식 프로세스까지 정리하도록 했다. 실제 영상이 관제 화면에 도착하는 것은 확인했지만 stop/watchdog acknowledgement, Nav2/AMCL, action 결과와 이동 시험은 별도 현장 gate에서 확인해야 한다. mock/transport contract test 통과는 실물 안전 제어의 증거가 아니다.
+robot_2 현장 시험에서는 호환 라이브러리 우선 적용 후 domain 13의 카메라가 `320x240 @ 8Hz`로 초기화되는 것을 확인했다. `/camera/front` publisher와 raw-to-compressed republisher, 압축 토픽의 rosbridge 구독은 세션 런처 통합 시험에서 확인했다. 단, 다중 publisher가 남아 있으면 카메라 장치 충돌이 발생하므로 `deployment/scripts/start-pinky-robot2-session.sh`가 중복 camera/republisher/rosbridge/watchdog를 거부하고, 실패 시 자식 프로세스까지 정리하도록 했다. 실제 영상, stop/watchdog acknowledgement, Nav2/AMCL, action 성공과 1차 이동은 확인했다. 반복 도착 정밀도·장애물 회피·수동 재배치 후 재현지화는 별도 현장 gate이며, mock/transport contract test 통과만으로 실물 안전 제어를 증명하지 않는다.

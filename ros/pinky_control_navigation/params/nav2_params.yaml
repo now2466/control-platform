@@ -155,8 +155,8 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       stateful: true
-      xy_goal_tolerance: 0.25                    # [m] 목표 지점 반경 0.25m 안에 들어오면 도착 인정
-      yaw_goal_tolerance: 0.25                   # [rad] 목표 각도 오차 약 14도 이내면 올바르게 본 것으로 인정
+      xy_goal_tolerance: 0.08                    # [m] 현장 클릭 목표의 8cm 반경 안에 들어오면 도착 인정
+      yaw_goal_tolerance: 0.17                   # [rad] 목표 각도 오차 약 10도 이내면 올바르게 본 것으로 인정
 
     # ==========================================================
     # 4. 주행 진척도 검사 (Progress Checker)

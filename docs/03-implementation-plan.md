@@ -253,7 +253,7 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 - [x] 요구사항 ID마다 PASS/FAIL/NOT_RUN 및 증거를 `acceptance-report.md`에 기록한다.
 - [ ] 실패 항목을 수정한 후 해당 검증을 재실행한다. 하드웨어 미검증은 NOT_RUN으로 남긴다.
 
-### T15 — 지도 클릭 단일 로봇 Nav2 주행·AMCL 재현지화 (R02/R06/R16) — 구현 완료, 실물 gate 대기
+### T15 — 지도 클릭 단일 로봇 Nav2 주행·AMCL 재현지화 (R02/R06/R16) — 실물 1차 주행 완료, 정밀도 gate 진행
 
 파일: `backend/pinky_control_center/navigation_service.py`, `backend/pinky_control_center/api/navigation.py`, `frontend/src/MapPanel.tsx`, `frontend/src/App.tsx`, `ros/pinky_control_navigation/`, `ros/pinky_control_watchdog/pinky_control_watchdog/manual_velocity_watchdog.py`, `deployment/scripts/start-pinky-robot2-session.sh`, `backend/tests/test_t15_map_navigation.py`, `frontend/src/MapPanel.test.tsx`.
 
@@ -262,8 +262,9 @@ python -m pytest backend/tests/test_rosbridge_adapter.py -q
 - [x] 시작점 `/initialpose` → `AUTO` → `NavigateToPose` 순서를 backend/watchdog에 연결하고, Nav2 출력은 `/control/nav_velocity`, 최종 `/cmd_vel`은 watchdog 단일 publisher로 구성했다.
 - [x] `map_260905.world`에서 동일한 `map_260905.pgm/.yaml`을 패키징하고, session script가 watchdog·SLLidar start·AMCL·Nav2를 선택적으로 시작하도록 했다. navigation lifecycle은 `map→base_footprint` TF가 확인될 때까지 대기·재시도하며, `stop`/정지 해제 뒤 자동 재개하지 않는다.
 - [x] 로봇을 들어 옮긴 뒤 새 시작점으로 재현지화하는 mock/API/UI 테스트와 문서를 갱신했다.
-- [ ] robot_2에서 새 패키지를 `colcon build`하고 `/navigate_to_pose` action server·AMCL lifecycle·TF 대기 후 navigation lifecycle 활성화·`map→odom→base_footprint` TF를 확인한다.
-- [ ] 실제 현장에서는 우측 상단 모서리 자체가 아닌 안쪽의 자유 셀을 시작점으로 선택해 저속 주행·정지·재설정·재주행을 검증한다. 충돌 위험 시 물리적으로 들어 옮기기 전에 정지 확인을 완료한다.
+- [x] robot_2에서 새 패키지를 `colcon build`하고 `/navigate_to_pose` action server·AMCL lifecycle·TF 대기 후 navigation lifecycle 활성화·`map→odom→base_footprint` TF를 확인했다.
+- [x] robot_2가 지도 목표를 받아 실제 이동하고 Nav2 action `SUCCEEDED`를 반환하는 1차 현장 시험을 완료했다. 기존 0.25m 목표 허용오차로 약 0.22m 전에 성공 처리된 결과를 반영해 평면 0.08m·방향 0.17rad로 조정했다.
+- [ ] 우측 상단 안쪽 자유 셀에서 조정된 허용오차의 최종 위치·방향 오차, 저속 정지, 재설정·재주행을 반복 검증한다. 충돌 위험 시 물리적으로 들어 옮기기 전에 정지 확인을 완료한다.
 
 검증:
 
