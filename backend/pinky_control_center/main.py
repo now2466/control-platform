@@ -116,6 +116,25 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
         state_store.disconnect(robot_id)
         await command_service.protective_stop(robot_id)
 
+    async def zero_teleop_velocity(robot_id: str) -> None:
+        """Clear an expired deadman input without latching an operator stop.
+
+        A normal button release or a quiet teleop socket is different from a
+        lost connection, lease expiry, or explicit stop.  The robot-side
+        watchdog also zeros stale input, so the backend should only refresh
+        that zero here.  If the zero cannot be delivered, fall back to the
+        latched protective-stop path.
+        """
+        publish = getattr(adapter, "publish_manual_velocity", None)
+        if publish is None:
+            return
+        try:
+            accepted = await publish(robot_id, 0.0, 0.0)
+        except Exception:
+            accepted = None
+        if accepted is None or not accepted.accepted:
+            await protective_stop(robot_id)
+
     async def runtime_tick() -> None:
         refresh_stops()
         for event in getattr(adapter, "drain_events", lambda: [])():
@@ -135,7 +154,7 @@ def create_app(mode: Literal["mock", "ros"] = "mock", config_path: Path | None =
                     alert_service.record_protective_stop_unconfirmed(alert.code, unconfirmed)
         await mission_service.tick()
         for robot_id in teleop_service.tick():
-            await protective_stop(robot_id)
+            await zero_teleop_velocity(robot_id)
         if storage.expire_security():
             # An expired control identity invalidates manual authority for both robots.
             await protective_stop("robot_1")

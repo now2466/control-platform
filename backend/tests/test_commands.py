@@ -10,7 +10,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from pinky_control_center.main import create_app
-from pinky_control_center.models import MockScenario, UserRole
+from pinky_control_center.models import CommandAcceptance, MockScenario, UserRole
 
 ORIGIN = "http://localhost:5173"
 
@@ -54,24 +54,23 @@ def test_routes_cap_normal_work_and_execute_priority_stop_first(tmp_path: Path) 
         assert status.json()["targets"] == [{"robot_id": "robot_2", "state": "ACKNOWLEDGED"}]
 
 
-def test_runtime_watchdog_uses_fake_monotonic_clock_and_disconnects_selected_robot(tmp_path: Path) -> None:
+def test_runtime_watchdog_zeros_expired_teleop_without_latching_stop(tmp_path: Path) -> None:
     now = 0.0
     app = create_app(database_path=tmp_path / "control.db", monotonic_clock=lambda: now, start_command_worker=False)
     with TestClient(app):
-        calls: list[str] = []
-        original = app.state.adapter.execute
+        calls: list[tuple[str, float, float]] = []
 
-        async def execute(command):
-            calls.append(command.robot_id)
-            return await original(command)
+        async def publish_manual_velocity(robot_id: str, linear_mps: float, angular_rps: float) -> CommandAcceptance:
+            calls.append((robot_id, linear_mps, angular_rps))
+            return CommandAcceptance(accepted=True)
 
-        app.state.adapter.execute = execute
+        app.state.adapter.publish_manual_velocity = publish_manual_velocity
         app.state.teleop_service.enter("robot_2", lease_valid=True)
         assert app.state.teleop_service.ingest("robot_2", 1, .1, 0) == "ACCEPTED"
         now = .31
         asyncio.run(app.state.runtime_tick())
-        assert calls == ["robot_1", "robot_2"]
-        assert app.state.state_store.snapshot().robots[1].connection == "OFFLINE"
+        assert calls == [("robot_2", 0.0, 0.0)]
+        assert app.state.state_store.snapshot().robots[1].connection.value == "ONLINE"
 
 
 def test_stop_stays_running_until_observation_confirms_then_succeeds(tmp_path: Path) -> None:

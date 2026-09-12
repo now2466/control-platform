@@ -28,6 +28,7 @@ class MockRobotAdapter:
         self._config = config or load_mock_config()
         self._initial_poses: dict[RobotId, Pose] = {}
         self._settings: dict[str, object] = {}
+        self._velocities: dict[RobotId, tuple[float, float]] = {}
 
     def _robot(self, robot_id: RobotId):
         return next(robot for robot in self._config.robots if robot.robot_id == robot_id)
@@ -45,6 +46,10 @@ class MockRobotAdapter:
 
     async def close(self) -> None:
         self._connected = False
+
+    async def publish_manual_velocity(self, robot_id: RobotId, linear_mps: float, angular_rps: float) -> CommandAcceptance:
+        self._velocities[robot_id] = (linear_mps, angular_rps)
+        return CommandAcceptance(accepted=True)
 
     async def execute(self, command: CommandRequest) -> CommandAcceptance:
         if self._scenario is MockScenario.COMMAND_REJECTED:

@@ -155,7 +155,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 상태 WS `/ws/state`: `{type,seq,server_time,payload}`. type은 snapshot/robot_state/formation/mission/command/alert/camera_status. 최초 snapshot, 이후 상태 5Hz와 이벤트 즉시 전송. 클라이언트 sequence 누락 시 GET state 재동기화. 느린 클라이언트 큐 100개 초과 시 연결 종료 후 snapshot으로 복구, 명령 결과는 DB로 조회 가능.
 
-수동 WS `/ws/teleop`: `{lease_id,robot_id,seq,linear_mps,angular_rps}`. mode·lease·증가 seq·상한 검증, 오래된 패킷 거부. 전송 timestamp 대신 서버 수신 monotonic 시간을 watchdog 기준으로 사용한다. 연결 해제 시 즉시 중단.
+수동 WS `/ws/teleop`: `{lease_id,robot_id,seq,linear_mps,angular_rps}`. mode·lease·증가 seq·상한 검증, 오래된 패킷 거부. 전송 timestamp 대신 서버 수신 monotonic 시간을 watchdog 기준으로 사용한다. 버튼 해제·입력 timeout은 선택 로봇에 0속도를 전달하고 정지 래치를 걸지 않는다. 웹소켓 연결 해제, lease 만료, 명시적 정지와 안전 경보는 별도의 보호 정지 래치를 적용한다.
 
 영상 WS `/ws/cameras/{robot_id}`: 메시지 하나는 `4-byte big-endian 메타데이터 길이 + UTF-8 JSON + JPEG bytes`. 메타데이터는 `{frame_id,captured_at,received_at,width,height}`. 프런트엔드는 최신 프레임만 렌더링하고 기존 Blob URL 해제. 저화질 320×240/5FPS, 기본 640×480/10FPS, 고화질 1280×720/15FPS 요청을 query quality로 받되 원본보다 업스케일하지 않는다. 실제 달성 FPS와 촬영시각 유효성을 표시한다. reconnect backoff는 1/2/4/8초, 최대 8초.
 
