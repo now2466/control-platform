@@ -65,6 +65,20 @@ T02 범위는 저장·인증·상태 배포다. 로그인 후 세션, CSRF, 인�
 
 배포와 mock 수용 절차는 [runbook.md](runbook.md), 결과 추적표는 [acceptance-report.md](acceptance-report.md)에서 관리한다. rosbridge·robot_2 Nav2 session은 API systemd 서비스와 별도 lifecycle이며, 실제 action/AMCL/TF·저속 주행은 acceptance gate에서 확인한다.
 
+## 커밋 보안 검사
+
+Gitleaks와 민감 파일 검사를 커밋 전에 실행하려면 개발 환경에서 한 번 설치한다.
+
+```bash
+cd backend
+.venv/bin/python -m pip install pre-commit
+cd ..
+backend/.venv/bin/pre-commit install
+backend/.venv/bin/pre-commit run --all-files
+```
+
+설치 후 `git commit`마다 staged 변경에서 토큰·비밀번호·개인키를 검사하고, `.env`, DB, key store, SSH 키와 `secrets/` 파일의 커밋을 차단한다. GitHub의 모든 push와 PR에서도 같은 Gitleaks 검사와 민감 파일 검사를 다시 수행한다. 오탐은 비밀값이 아님을 확인한 뒤 최소 범위 allowlist로 코드 리뷰를 받아 처리하며 `--no-verify` 또는 검사 비활성화를 일반 절차로 사용하지 않는다.
+
 ## 읽는 순서
 
 1. [사용자 가이드](docs/user-guide.md): 실행, 화면 구성, 편대·임무·정지·카메라 사용법.
