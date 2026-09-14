@@ -229,6 +229,8 @@ mock 모드에서는 다음 흐름을 확인할 수 있다.
 
 ROS 모드는 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`에 각각 연결되는 rosbridge adapter와 상태·배터리·경로·압축 카메라 수신을 제공한다. Domain ID는 UI에서 변경하지 않는다.
 
+현장 공용 Wi-Fi에서 두 대를 동시에 연결할 때의 현재 고정 주소는 `robot_1=192.168.0.8`, `robot_2=192.168.0.18`이다. robot_1은 아직 rosbridge 패키지가 설치되지 않아 PC에서 domain 12 rosbridge를 `127.0.0.1:9090`으로 실행하고, robot_2는 로봇 내부 domain 13 rosbridge의 `192.168.0.18:9091`을 사용한다. 두 로봇의 DHCP 주소가 바뀌지 않도록 공유기에서 각 MAC 주소에 대한 DHCP 예약을 설정한다.
+
 Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결이 추가로 필요하다.
 
 - 겹치지 않는 위치에 두 로봇을 생성하는 dual-robot launch

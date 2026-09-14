@@ -110,13 +110,13 @@ source /opt/ros/jazzy/setup.bash
 /usr/bin/python3 deployment/launch/control_center.launch.py
 ```
 
-이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. 실물 robot_2는 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 `/home/pinky/dev_ws/wj/src/`에 복사하고 `colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog`로 빌드한다. hardware bringup은 별도 터미널에서 실행하고, `deployment/scripts/start-pinky-robot2-session.sh`가 rosbridge·watchdog·카메라·압축 변환을 시작한다. `ros2 topic info /control/status -v`, `ros2 service type /control/command`, `/cmd_vel`의 유일한 publisher를 확인한다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 자동 주행 단계로 간다. control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
+이 launch는 API나 Gazebo를 시작하지 않고 `robot_1 → ws://127.0.0.1:9090`(domain 12), `robot_2 → ws://127.0.0.1:9091`(domain 13)의 rosbridge만 시작한다. `/robot_1`과 `/robot_2`의 `odom`, `scan`, `/tf`·`/tf_static`를 각각 확인한다. 현재 현장 공용 Wi-Fi 구성에서는 robot_1(`192.168.0.8`)에 rosbridge가 없어 PC의 domain 12 rosbridge `127.0.0.1:9090`을 사용하고, robot_2(`192.168.0.18`)는 로봇 내부 rosbridge `192.168.0.18:9091`을 사용한다. 실물 robot_2는 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog`를 `/home/pinky/dev_ws/wj/src/`에 복사하고 `colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog`로 빌드한다. hardware bringup은 별도 터미널에서 실행하고, `deployment/scripts/start-pinky-robot2-session.sh`가 rosbridge·watchdog·카메라·압축 변환을 시작한다. `ros2 topic info /control/status -v`, `ros2 service type /control/command`, `/cmd_vel`의 유일한 publisher를 확인한다. `map → <robot>/odom → <robot>/base_footprint` TF가 유효할 때만 자동 주행 단계로 간다. control/follow 계약, 단일 cmd_vel 중재, stop 래치·watchdog 계약이 없으면 실물 인수는 중단하고 NOT_RUN으로 기록한다.
 
 검증 순서는 무이동 상태의 상태 수신 → 카메라 → stop/reset service → MANUAL mode → 입력 중단 watchdog(선택 로봇 0속도, 정상 래치 없음) → Nav2 action/AMCL/TF 확인 → 저속 개별 주행 → 개별 정지 → 재연결이며, 무이동 검증을 통과하기 전에는 속도 제어를 열지 않는다. 웹소켓 단절·lease 만료·명시적 정지는 별도 보호 정지 래치로 확인한다. 결과와 명령·로그 증거는 [acceptance-report.md](acceptance-report.md)에 기록한다.
 
 ## 6. robot_2 단일 로봇 지도 주행·재현지화 시험
 
-이 절차는 `robot_2`, ROS_DOMAIN_ID `13`, 로봇 주소 `192.168.4.1`인 현재 시험 구성을 기준으로 한다. `robot_1` domain 12와는 별도 rosbridge를 사용한다. 아래 절차를 수행해도 실제 이동 명령은 현장 담당자가 안전을 확인한 뒤 직접 실행해야 한다.
+이 절차는 `robot_2`, ROS_DOMAIN_ID `13`, 현장 공용 Wi-Fi 주소 `192.168.0.18`인 현재 시험 구성을 기준으로 한다. `robot_1` domain 12와는 별도 rosbridge를 사용한다. 아래 절차를 수행해도 실제 이동 명령은 현장 담당자가 안전을 확인한 뒤 직접 실행해야 한다.
 
 현장 클릭 목표의 Nav2 도달 허용오차는 평면 0.08m, 방향 0.17rad(약 10도)다. 변경 전 0.25m 설정에서는 목표 약 0.22m 전에 정상 성공 처리된 사례가 있으므로, 시험 기록에는 클릭 목표와 최종 `map→base_footprint` pose의 거리·방향 오차를 함께 남긴다.
 
@@ -127,10 +127,10 @@ source /opt/ros/jazzy/setup.bash
 로봇의 기존 bringup/session 프로세스를 확인한 뒤, 소스 패키지를 명시된 workspace에 복사한다. 기존 bringup은 유지할 수 있지만, 이전에 별도로 실행한 camera publisher·image republisher·rosbridge·watchdog는 session script와 중복되지 않게 종료한다.
 
 ```bash
-ssh pinky@192.168.4.1 'mkdir -p /home/pinky/dev_ws/wj/src'
+ssh pinky@192.168.0.18 'mkdir -p /home/pinky/dev_ws/wj/src'
 scp -r ros/pinky_control_interfaces ros/pinky_control_watchdog ros/pinky_control_navigation \
-  pinky@192.168.4.1:/home/pinky/dev_ws/wj/src/
-ssh pinky@192.168.4.1
+  pinky@192.168.0.18:/home/pinky/dev_ws/wj/src/
+ssh pinky@192.168.0.18
 ```
 
 로봇 shell에서 underlay를 먼저 source하고 의존성을 확인한 뒤 overlay를 빌드한다.

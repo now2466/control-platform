@@ -31,10 +31,10 @@ deployment/scripts/acceptance.sh
 
 | 요구사항/시험 | 상태 | 필요한 증거 |
 |---|---|---|
-| robot_1 domain 12 / bridge 9090 | NOT_RUN | rosbridge 로그, `ros2 topic list`, 연결 상태 |
+| robot_1 domain 12 / bridge 9090 | PASS | 2026-09-14 `192.168.0.8` hardware bringup, PC rosbridge `127.0.0.1:9090`, 플랫폼 `ONLINE` 및 odom·배터리 FRESH, scan/TF 구독 확인 |
 | robot_2 domain 13 / bridge 9091 | PASS | 2026-09-12 rosbridge client 연결, `/odom`·배터리·TF·카메라 구독 및 웹 실영상 확인 |
 | 두 namespace의 TF 경로와 공통 map 좌표 | NOT_RUN | `tf2_tools view_frames`, 시간 동기 상태 |
-| compressed camera topic 매핑·두 스트림·실제 FPS/p95 | NOT_RUN | 실제 `CompressedImage` topic/변환 확인, 10분 측정 CSV/스크린샷 |
+| compressed camera topic 매핑·두 스트림·실제 FPS/p95 | PARTIAL | 2026-09-14 robot_2 `/camera/image_raw/compressed` publisher 1개와 플랫폼 JPEG HTTP 200 확인. robot_1 카메라/control workspace 미설치, 두 스트림 장기 FPS/p95 미측정 |
 | control/follow 수락·결과·재연결 | NOT_RUN | command_id 로그와 adapter contract test |
 | stop latch·watchdog·최종 cmd_vel 단일 중재 | NOT_RUN | 로봇 측 출력 0 및 래치 증거 |
 | robot_2 control/watchdog/navigation 패키지 build | PASS | 2026-09-12 `/home/pinky/dev_ws/wj`에서 3개 패키지 `colcon build` 통과 |
@@ -48,3 +48,5 @@ deployment/scripts/acceptance.sh
 실물에서 제공되지 않은 follow/control 서비스는 `UNSUPPORTED`로 표시하며 PASS로 대체하지 않는다. Nav2 action server 또는 AMCL/TF가 준비되지 않으면 자동 주행 버튼을 사용하지 않는다. 서버 재시작 뒤 자동 주행 재개가 관찰되면 즉시 FAIL로 기록하고 임무를 재개하지 않은 상태에서 원인을 수정한다. 시험 중 로봇을 들어 옮길 때는 정지 확인 후 `localization-reset`을 사용하며, 정적 map 파일을 초기화하지 않는다.
 
 rosbridge는 systemd API 서비스와 별도 lifecycle이다. ROS supervisor가 종료·재시작을 관리하며, API 서비스만 재시작해도 rosbridge가 자동으로 생긴다고 가정하지 않는다.
+
+2026-09-14 두 로봇 동시 연결 smoke에서는 robot_1(`192.168.0.8`, domain 12)과 robot_2(`192.168.0.18`, domain 13)가 동시에 `ONLINE`이고 pose가 `FRESH`로 유지됐으며 두 sensor-layer API에서 scan 표본을 수신했다. 초기 API 표본에서는 양쪽 battery도 `FRESH`였지만 30초 표본 중 robot_2 battery가 `STALE`로 전환되어 갱신 안정성은 미통과다. robot_2 카메라는 `OK` 및 JPEG 11,679 bytes를 반환했고 stop latch는 true로 유지됐다. robot_1은 카메라/control workspace와 로봇 내부 rosbridge가 없어 camera `STALE`, mode `UNKNOWN`, capability 없음이 예상대로 표시됐다. Nav2를 비활성화한 무이동 연결 smoke이므로 양쪽 `MAP_TF_UNVERIFIED`는 미해결 gate로 남긴다. 같은 시점의 ICMP 지연은 robot_1 평균 350ms, robot_2 평균 543ms·최대 1.03초로 원격 주행 안정성 기준에는 부적합했다.

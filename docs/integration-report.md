@@ -12,9 +12,13 @@ Optional secure bridge mapping is available only for `wss://` URLs. `security.ve
 
 실물 robot_2에서 확인한 계약은 `cmd_vel` (`Twist`), `odom` (`Odometry`), `battery/percent`·`battery/voltage` (`Float32`), `scan` (`LaserScan`), `tf`/`tf_static`, 그리고 `rosy_control/camera_detect_node`가 발행하는 raw `/camera/front` (`sensor_msgs/msg/Image`)다. 관제용 카메라는 로봇 세션 런처가 `/camera/front`를 `/camera/image_raw/compressed` (`sensor_msgs/msg/CompressedImage`)로 변환한 뒤 rosbridge가 전달한다. 이 로봇의 Python libcamera 0.3.2와 `/usr/local` IPA는 ROS Jazzy libpisp 1.5.0과 ABI가 다르므로, 세션 런처는 카메라 프로세스에 호환되는 `/usr/local` libpisp 1.0.7을 우선 적용한다. 기존 frame string과 Nav2 설정은 namespace/frame prefix가 실제 2대 환경에서 올바르게 적용되는지 검증되지 않았다.
 
+2026-09-14 현장 공용 Wi-Fi에서 `robot_1=192.168.0.8`, `robot_2=192.168.0.18`로 식별했다. 두 장비는 복제 이미지로 hostname과 `/etc/machine-id`가 같지만 WLAN MAC은 서로 다르다. robot_1에는 아직 rosbridge와 control workspace가 없으므로 연결 시험은 PC의 domain 12 rosbridge를 사용하고, robot_2는 로봇 내부 domain 13 rosbridge를 사용한다.
+
+같은 날 동시 연결 smoke에서 두 로봇의 pose·scan과 robot_2 압축 영상은 계속 수신됐지만, PC에서 측정한 ICMP 왕복 지연은 robot_1 평균 350ms, robot_2 평균 543ms·최대 1.03초였다. robot_2 배터리는 초기 수신 뒤 freshness가 간헐적으로 `STALE`이 됐다. 이 상태는 연결 확인에는 충분하지만 원격 수동·자동 주행의 안정성 gate는 통과하지 못한 것으로 기록한다.
+
 현재 확인되지 않았거나 제공되지 않은 항목은 다음과 같다.
 
-- robot_1의 실제 endpoint와 robot_2의 TLS/credentials, 그리고 두 로봇의 장기 실행 서비스 환경
+- robot_1의 로봇 내부 rosbridge/control/camera 설치와 robot_2의 TLS/credentials, 그리고 두 로봇의 장기 실행 서비스 환경
 - `map -> robot_N/odom -> robot_N/base_footprint` TF tree와 QoS
 - domain 13 camera publisher와 raw-to-CompressedImage bridge는 세션 smoke에서 확인했으며, 장기 실행·실제 FPS 측정은 별도 gate다.
 - `pinky_control_interfaces`의 control status/command와 `pinky_control_watchdog` 단일 `cmd_vel` mediator는 저장소와 robot_2용 session script에 추가했다. follow status/command와 heartbeat의 backend 소비는 아직 미완료다.
