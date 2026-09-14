@@ -115,7 +115,7 @@ class RosbridgeAdapter:
             connection=Connection.OFFLINE, received_at=None, pose=None,
             pose_freshness=Freshness.UNKNOWN, battery_freshness=Freshness.UNKNOWN,
             mode=RobotMode.UNKNOWN, tf_valid=False, tf_reason_code="ROSBRIDGE_OFFLINE",
-            sensors=[SensorStatus(name="camera", state=SensorState.STALE)],
+            sensors=[SensorStatus(name="camera", state=SensorState.STALE)] if robot.camera.enabled else [],
         )
 
     async def connect(self) -> None:
@@ -205,16 +205,19 @@ class RosbridgeAdapter:
     async def _subscribe(self, robot_id: RobotId, socket: Any) -> None:
         robot = self._by_id[robot_id]
         topics = robot.topics
-        subscriptions = (
+        subscriptions = [
             (topics.odom, "nav_msgs/msg/Odometry", 0),
             (topics.battery_percent, "std_msgs/msg/Float32", 0),
             (topics.battery_voltage, "std_msgs/msg/Float32", 0),
             (topics.control_status, None, 0),
-            (topics.camera_compressed, "sensor_msgs/msg/CompressedImage", robot.camera.throttle_rate_ms),
             (topics.tf, "tf2_msgs/msg/TFMessage", 0),
             (topics.tf_static, "tf2_msgs/msg/TFMessage", 0),
             (topics.scan, "sensor_msgs/msg/LaserScan", 200),
-        )
+        ]
+        if robot.camera.enabled:
+            subscriptions.append(
+                (topics.camera_compressed, "sensor_msgs/msg/CompressedImage", robot.camera.throttle_rate_ms)
+            )
         for topic, message_type, throttle_rate in subscriptions:
             payload: dict[str, object] = {"op": "subscribe", "topic": topic, "queue_length": 1}
             if message_type:
@@ -252,7 +255,8 @@ class RosbridgeAdapter:
             "mode": RobotMode.UNKNOWN, "stop_latched": None, "capabilities": [],
             "trail": [], "path": [], "goal": None,
             "tf_valid": False, "tf_reason_code": "ROSBRIDGE_OFFLINE",
-            "sensors": [SensorStatus(name="camera", state=SensorState.STALE)],
+            "sensors": [SensorStatus(name="camera", state=SensorState.STALE)]
+            if self._by_id[robot_id].camera.enabled else [],
         })
 
     async def _handle_raw(self, robot_id: RobotId, raw: str | bytes, socket: Any | None = None) -> bool:

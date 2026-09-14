@@ -98,6 +98,29 @@ def test_rosbridge_routes_subscriptions_and_commands_to_the_matching_robot() -> 
     asyncio.run(exercise())
 
 
+def test_rosbridge_does_not_subscribe_when_camera_is_disabled() -> None:
+    async def exercise() -> None:
+        data = load_ros_config().model_dump(mode="python")
+        for robot in data["robots"]:
+            robot["camera"]["enabled"] = False
+        config = RosbridgeConfig.model_validate(data)
+        sockets = {robot.bridge_url: FakeSocket() for robot in config.robots}
+
+        async def connect(url: str, **_kwargs):
+            return sockets[url]
+
+        adapter = RosbridgeAdapter(config, connect_factory=connect)
+        await adapter.connect()
+        await asyncio.sleep(0)
+        for robot in config.robots:
+            topics = {item["topic"] for item in sockets[robot.bridge_url].sent if item["op"] == "subscribe"}
+            assert robot.topics.camera_compressed not in topics
+        assert all(state.sensors == [] for state in adapter.snapshot().robots)
+        await adapter.close()
+
+    asyncio.run(exercise())
+
+
 def test_rosbridge_decodes_compressed_camera_and_never_treats_odom_as_map_pose() -> None:
     async def exercise() -> None:
         adapter = RosbridgeAdapter(load_ros_config())

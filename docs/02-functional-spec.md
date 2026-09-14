@@ -189,7 +189,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 두 로봇이 공통 map에서 위치 추정하는 구성을 기본으로 한다. 목표 TF는 `map → robot_1/odom → robot_1/base_footprint`, robot_2도 동일하다. 각 로봇 odom 좌표를 그대로 같은 지도 좌표로 간주하지 않는다. 서로 다른 map을 쓰는 경우 보정된 map transform이 제공될 때까지 편대 시작을 차단한다.
 
-로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
+로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 로봇별 `camera.enabled=false`이면 compressed image 토픽을 구독하지 않고 카메라 센서 상태도 생성하지 않는다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
 
 실물 Pinky bringup이 namespace 없는 전역 토픽을 발행하는 경우에도 로봇별 rosbridge endpoint가 domain 격리 경계이므로, 배포 매핑은 `/odom`, `/battery/percent`, `/battery/voltage`, `/tf`, `/tf_static`, `/initialpose`, `/control/manual_velocity` 같은 전역 이름을 사용할 수 있다. 시뮬레이터 또는 namespace를 제공하는 로봇은 해당 환경의 매핑을 사용한다.
 
@@ -198,7 +198,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 | 입력 | `/map`, `/tf`, `/tf_static` | OccupancyGrid, TFMessage. 지도 reliable/transient_local, 동적 TF 기본 tf2 정책 |
 | 입력 | `{ns}/odom`, `{ns}/scan` | Odometry, LaserScan. 센서 best_effort/volatile을 기본으로 발행자 호환 확인 |
 | 입력 | `{ns}/battery/percent`, `battery/voltage` | Float32. percent 값 범위를 실측해 0~100으로 정규화 |
-| 입력 | 설정한 compressed image 토픽 | 실물 Pinky는 `/camera/front` raw `Image`를 발행하고, 로봇 세션 런처가 `/camera/image_raw/compressed` `CompressedImage`로 변환한 토픽을 rosbridge JSON/base64로 전달한다. 관제는 이를 JPEG로 변환하며 quality/throttle/fragment를 설정하고 별도 binary gateway는 옵션이다. |
+| 입력 | 설정한 compressed image 토픽 | 실물 Pinky는 `/camera/front` raw `Image`를 발행하고, 로봇 세션 런처가 `/camera/image_raw/compressed` `CompressedImage`로 변환한 토픽을 rosbridge JSON/base64로 전달한다. 관제는 이를 JPEG로 변환하며 quality/throttle/fragment를 설정하고 별도 binary gateway는 옵션이다. 현재 YYM 현장 프로필은 두 로봇 모두 `camera.enabled=false`로 설정해 이 입력을 구독하지 않는다. |
 | 입력 | `{ns}/plan`, `local_costmap/costmap`, `global_costmap/costmap` | Path 및 실제 발행 타입에 맞춘 OccupancyGrid/Costmap 어댑터 |
 | 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 로봇 watchdog가 자체 goal handle을 추적·취소하고 ControlStatus에 capability/상태를 보고 |
 | 제어 | 설정한 initial pose 토픽 (실물 Pinky: `/initialpose`) | PoseWithCovarianceStamped, 정지 시 허용 |

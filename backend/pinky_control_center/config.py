@@ -74,6 +74,7 @@ class RosbridgeServices(BaseModel):
 
 class RosbridgeCameraOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
     throttle_rate_ms: int = Field(default=100, ge=1, le=60_000)
     fragment_size: int = Field(default=65_536, ge=1024, le=1_000_000)
 

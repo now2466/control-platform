@@ -227,9 +227,9 @@ mock 모드에서는 다음 흐름을 확인할 수 있다.
 - 경고 확인
 - 설정, 초기 위치와 운용 이력
 
-ROS 모드는 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`에 각각 연결되는 rosbridge adapter와 상태·배터리·경로·압축 카메라 수신을 제공한다. Domain ID는 UI에서 변경하지 않는다.
+ROS 모드는 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`에 각각 연결되는 rosbridge adapter와 상태·배터리·경로 수신을 제공한다. 현재 YYM 현장 프로필은 대역폭 확보를 위해 두 로봇의 카메라 발행과 관제 카메라 구독을 비활성화한다. Domain ID는 UI에서 변경하지 않는다.
 
-현장 공용 Wi-Fi에서 두 대를 동시에 연결할 때의 현재 고정 주소는 `robot_1=192.168.0.8`, `robot_2=192.168.0.18`이다. robot_1은 아직 rosbridge 패키지가 설치되지 않아 PC에서 domain 12 rosbridge를 `127.0.0.1:9090`으로 실행하고, robot_2는 로봇 내부 domain 13 rosbridge의 `192.168.0.18:9091`을 사용한다. 두 로봇의 DHCP 주소가 바뀌지 않도록 공유기에서 각 MAC 주소에 대한 DHCP 예약을 설정한다.
+YYM Wi-Fi에서 두 대를 동시에 연결할 때의 현재 주소는 `robot_1=172.20.10.9`, `robot_2=172.20.10.8`이다. robot_1은 PC에서 domain 12 rosbridge를 `127.0.0.1:9090`으로 실행하고, robot_2는 로봇 내부 domain 13 rosbridge의 `172.20.10.8:9091`을 사용한다. 두 로봇의 DHCP 주소가 바뀌지 않도록 공유기에서 각 MAC 주소에 대한 DHCP 예약을 설정한다.
 
 Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결이 추가로 필요하다.
 
@@ -237,10 +237,9 @@ Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결
 - domain 12/13 각각의 `ros_gz_bridge`와 rosbridge
 - 로봇별 Nav2와 관제용 control mediator
 - 슬레이브 follow controller와 정지 latch/watchdog
-- raw 카메라의 `CompressedImage` 변환
 - `map → robot_N/odom → robot_N/base_footprint` TF 검증
 
-robot_2 실물 시험의 권장 기동 방법은 `deployment/scripts/start-pinky-robot2-all.sh` 하나로 hardware bringup과 관제 세션을 함께 실행하는 것이다. 이 스크립트는 부팅 때 domain 0으로 실행되는 기존 `rosy-session-bringup.service`와 `rosy-session-control.service`를 먼저 중지하고, `ROS_DOMAIN_ID=13`에서 `/odom`·`/scan`을 확인한 뒤 `start-pinky-robot2-session.sh`를 실행한다. 하위 session script는 watchdog, Nav2, `camera_detect_node`, raw→compressed 변환, `rosbridge_websocket:9091`을 한 수명 주기로 관리한다. 두 스크립트 모두 `ROS_LOCALHOST_ONLY`를 해제한다.
+robot_2 실물 시험의 권장 기동 방법은 `deployment/scripts/start-pinky-robot2-all.sh` 하나로 hardware bringup과 관제 세션을 함께 실행하는 것이다. 이 스크립트는 부팅 때 domain 0으로 실행되는 기존 `rosy-session-bringup.service`와 `rosy-session-control.service`를 먼저 중지하고, `ROS_DOMAIN_ID=13`에서 `/odom`·`/scan`을 확인한 뒤 `start-pinky-robot2-session.sh`를 실행한다. 하위 session script는 watchdog, Nav2, `rosbridge_websocket:9091`을 한 수명 주기로 관리하며 카메라 프로세스는 시작하지 않는다. 두 스크립트 모두 `ROS_LOCALHOST_ONLY`를 해제한다.
 
 두 스크립트를 로봇에 복사하고 실행 권한을 부여한다.
 

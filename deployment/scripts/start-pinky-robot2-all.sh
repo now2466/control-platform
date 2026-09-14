@@ -144,12 +144,11 @@ wait_for_publisher /odom "$bringup_pid" 45 || fail "hardware bringup did not pub
 wait_for_publisher /scan "$bringup_pid" 45 || fail "hardware bringup did not publish /scan"
 echo "Hardware bringup is ready (/odom and /scan)."
 
-echo "Starting rosbridge, watchdog, Nav2 and camera..."
+echo "Starting rosbridge, watchdog and Nav2 (camera disabled)..."
 setsid "$ROBOT_SESSION_SCRIPT" &
 session_pid=$!
 
 wait_for_publisher /control/status "$session_pid" 30 || fail "watchdog did not publish /control/status"
-wait_for_publisher /camera/image_raw/compressed "$session_pid" 60 || fail "camera did not publish compressed frames"
 if [[ "$START_NAV2" == "1" ]]; then
   wait_for_action_server /navigate_to_pose "$session_pid" 90 || fail "Nav2 action server did not become ready"
 fi
@@ -160,7 +159,7 @@ echo "  domain:     $ROS_DOMAIN_ID"
 echo "  odometry:   /odom"
 echo "  lidar:      /scan"
 echo "  rosbridge:  ws://0.0.0.0:9091"
-echo "  camera:     /camera/image_raw/compressed"
+echo "  camera:     disabled"
 echo "  navigation: $START_NAV2 (/navigate_to_pose)"
 echo "Set the initial pose in the web UI after every reboot."
 echo "Press Ctrl+C once to stop the complete robot-side session."

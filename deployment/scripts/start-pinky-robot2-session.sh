@@ -11,19 +11,12 @@ PINKY_WS="${PINKY_WS:-/home/pinky/dev_ws/wj}"
 ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-13}"
 ROSBRIDGE_PORT="${ROSBRIDGE_PORT:-9091}"
 START_NAV2="${START_NAV2:-1}"
-CONFIG_DIR="$PINKY_WS/install/rosy_control/share/rosy_control/config"
-
-CAMERA_TOPIC="/camera/front"
-COMPRESSED_TOPIC="/camera/image_raw/compressed"
 CONTROL_STATUS_TOPIC="/control/status"
 
-camera_pid=""
-republisher_pid=""
 rosbridge_pid=""
 watchdog_pid=""
 nav2_pid=""
 cleanup_done=0
-camera_library_path=""
 
 fail() {
   echo "ERROR: $*" >&2
@@ -34,14 +27,14 @@ cleanup() {
   [[ "$cleanup_done" -eq 0 ]] || return
   cleanup_done=1
   set +e
-  for pid in "$nav2_pid" "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid"; do
+  for pid in "$nav2_pid" "$watchdog_pid" "$rosbridge_pid"; do
     if [[ -n "$pid" ]]; then
       # Each process is started in its own session so ros2run's child (for
       # example the Python rosbridge server) is stopped together with it.
       kill -INT -- "-$pid" 2>/dev/null || kill -INT "$pid" 2>/dev/null
     fi
   done
-  wait "$nav2_pid" "$republisher_pid" "$camera_pid" "$watchdog_pid" "$rosbridge_pid" 2>/dev/null || true
+  wait "$nav2_pid" "$watchdog_pid" "$rosbridge_pid" 2>/dev/null || true
 }
 
 wait_for_publisher() {
@@ -112,25 +105,12 @@ source "$PINKY_WS/install/setup.bash"
 # Enable nounset only after both underlay and overlay have been sourced.
 set -u
 
-camera_library_path="${PINKY_CAMERA_LD_LIBRARY_PATH:-${LD_LIBRARY_PATH:-}}"
-if [[ -f /usr/local/lib/aarch64-linux-gnu/libpisp.so.1 ]]; then
-  # camera_detect_node uses the Raspberry Pi libcamera 0.3.x Python stack.
-  # ROS Jazzy also ships libpisp, but its ABI is not compatible with the
-  # /usr/local libcamera IPA module on this robot. Prefer the matching local
-  # camera libraries for this process only while retaining the ROS paths.
-  camera_library_path="/usr/local/lib/aarch64-linux-gnu:/usr/local/lib:$camera_library_path"
-fi
-
 unset ROS_LOCALHOST_ONLY
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 export ROS_DOMAIN_ID
 export PATH="/usr/bin:/bin:$PATH"
 
-[[ -f "$CONFIG_DIR/robot.yaml" ]] || fail "missing $CONFIG_DIR/robot.yaml"
-[[ -f "$CONFIG_DIR/camera.yaml" ]] || fail "missing $CONFIG_DIR/camera.yaml"
 command -v ros2 >/dev/null || fail "ros2 is not available after sourcing ROS Jazzy"
-ros2 pkg prefix rosy_control >/dev/null || fail "rosy_control package is not available"
-ros2 pkg prefix image_transport >/dev/null || fail "image_transport package is not available"
 ros2 pkg prefix rosbridge_server >/dev/null || fail "rosbridge_server package is not available"
 ros2 pkg prefix pinky_control_watchdog >/dev/null || fail "pinky_control_watchdog package is not available; build the control workspace first"
 if [[ "$START_NAV2" == "1" ]]; then
@@ -140,15 +120,9 @@ elif [[ "$START_NAV2" != "0" ]]; then
 fi
 
 if systemctl --user is-active --quiet rosy-session-control.service; then
-  echo "Stopping rosy-session-control.service to avoid duplicate camera nodes..."
+  echo "Stopping legacy rosy-session-control.service..."
   systemctl --user stop rosy-session-control.service
 fi
-
-existing_camera="$(pgrep -u "$(id -un)" -f '[/]rosy_control/camera_detect_node' || true)"
-[[ -z "$existing_camera" ]] || fail "camera_detect_node is already running (PID(s): $existing_camera)"
-
-existing_republisher="$(pgrep -u "$(id -un)" -f '[i]mage_transport republish raw compressed' || true)"
-[[ -z "$existing_republisher" ]] || fail "image republisher is already running (PID(s): $existing_republisher)"
 
 existing_watchdog="$(pgrep -u "$(id -un)" -f '[/]pinky_control_watchdog/manual_velocity_watchdog' || true)"
 [[ -z "$existing_watchdog" ]] || fail "pinky control watchdog is already running (PID(s): $existing_watchdog)"
@@ -189,38 +163,15 @@ else
   echo "Nav2 is disabled (set START_NAV2=1 after building pinky_control_navigation)."
 fi
 
-echo "Starting Pinky camera publisher..."
-setsid env "LD_LIBRARY_PATH=$camera_library_path" ros2 run rosy_control camera_detect_node --ros-args \
-  --params-file "$CONFIG_DIR/robot.yaml" \
-  --params-file "$CONFIG_DIR/camera.yaml" &
-camera_pid=$!
-
-if ! wait_for_publisher "$CAMERA_TOPIC" "$camera_pid" 30; then
-  fail "camera publisher did not publish $CAMERA_TOPIC within 30 seconds"
-fi
-
-echo "Starting raw-to-compressed image republisher..."
-setsid ros2 run image_transport republish raw compressed --ros-args \
-  -p in_transport:=raw \
-  -p out_transport:=compressed \
-  -r in:="$CAMERA_TOPIC" \
-  -r out/compressed:="$COMPRESSED_TOPIC" &
-republisher_pid=$!
-
-if ! wait_for_publisher "$COMPRESSED_TOPIC" "$republisher_pid" 30; then
-  fail "compressed image publisher did not publish $COMPRESSED_TOPIC within 30 seconds"
-fi
-
 echo "Robot_2 session is ready."
 echo "  ROS_DOMAIN_ID: $ROS_DOMAIN_ID"
 echo "  rosbridge:     ws://0.0.0.0:$ROSBRIDGE_PORT"
-echo "  camera:        $CAMERA_TOPIC"
-echo "  compressed:     $COMPRESSED_TOPIC"
+echo "  camera:        disabled"
 echo "  control:       /control/manual_velocity -> /cmd_vel (watchdog)"
 echo "  navigation:    ${START_NAV2} (/navigate_to_pose -> /control/nav_velocity)"
 echo "Press Ctrl+C to stop this session. Hardware bringup is not stopped."
 
-session_pids=("$rosbridge_pid" "$camera_pid" "$watchdog_pid" "$republisher_pid")
+session_pids=("$rosbridge_pid" "$watchdog_pid")
 [[ -n "$nav2_pid" ]] && session_pids+=("$nav2_pid")
 wait -n "${session_pids[@]}"
 exit $?
