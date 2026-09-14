@@ -1,0 +1,60 @@
+# T12 handoff configuration. Secrets are read from environment variables and
+# are never stored in this file. Domain IDs are deployment invariants. Each
+# robot's rosbridge endpoint is the isolation boundary, so these mappings use
+# the global topic names emitted by the real Pinky bringup.
+robots:
+  - robot_id: robot_1
+    name: Pinky Master
+    role: MASTER
+    namespace: /robot_1
+    domain_id: 12
+    bridge_url: ws://127.0.0.1:9090
+    topics:
+      odom: /odom
+      battery_percent: /battery/percent
+      battery_voltage: /battery/voltage
+      camera_compressed: /camera/image_raw/compressed
+      control_status: /control/status
+      scan: /scan
+      path: /plan
+      manual_velocity: /control/manual_velocity
+      initial_pose: /initialpose
+      tf: /tf
+      tf_static: /tf_static
+    services:
+      control_command: /control/command
+      control_command_type: pinky_control_interfaces/srv/ControlCommand
+      control_available: false
+    camera:
+      enabled: false
+      throttle_rate_ms: 100
+      fragment_size: 65536
+  - robot_id: robot_2
+    name: Pinky Slave
+    role: SLAVE
+    namespace: /robot_2
+    domain_id: 13
+    bridge_url: ws://172.20.10.8:9091
+    topics:
+      odom: /odom
+      battery_percent: /battery/percent
+      battery_voltage: /battery/voltage
+      camera_compressed: /camera/image_raw/compressed
+      control_status: /control/status
+      scan: /scan
+      path: /plan
+      manual_velocity: /control/manual_velocity
+      initial_pose: /initialpose
+      tf: /tf
+      tf_static: /tf_static
+    services:
+      control_command: /control/command
+      control_command_type: pinky_control_interfaces/srv/ControlCommand
+      control_available: true
+      follow_command: /follow/command
+      follow_command_type: pinky_control_interfaces/srv/FollowCommand
+      follow_available: false
+    camera:
+      enabled: false
+      throttle_rate_ms: 100
+      fragment_size: 65536

@@ -5,7 +5,7 @@ type Robot = { robot_id: string; name: string; mode: string; pose?: { x: number;
 
 const initial: ActiveSettings = { version: 1, active_map_id: 'mock_lab', follow_distance_m: .8, follow_tolerance_m: .2, max_linear_mps: .15, max_angular_rps: .5, camera_quality: 'default' }
 
-export default function SettingsPage({ role, robots, selectedRobot, onError, onSaved, onLoaded }: { role: string; robots: Robot[]; selectedRobot: string; onError: (message: string) => void; onSaved: (value: ActiveSettings) => void; onLoaded?: (value: ActiveSettings) => void }) {
+export default function SettingsPage({ role, robots, selectedRobot, initialPose, poseResetVersion, onError, onSaved, onLoaded }: { role: string; robots: Robot[]; selectedRobot: string; initialPose?: Goal | null; poseResetVersion?: number; onError: (message: string) => void; onSaved: (value: ActiveSettings) => void; onLoaded?: (value: ActiveSettings) => void }) {
   const [settings, setSettings] = useState<ActiveSettings>(initial)
   const [maps, setMaps] = useState<MapSummary[]>([])
   const [pose, setPose] = useState<Goal>({ x: 0, y: 0, yaw: 0, frame_id: 'map' })
@@ -24,6 +24,12 @@ export default function SettingsPage({ role, robots, selectedRobot, onError, onS
   useEffect(() => {
     if (robot?.pose) setPose({ ...robot.pose, frame_id: robot.pose.frame_id ?? 'map' })
   }, [robot?.robot_id])
+  useEffect(() => {
+    if (initialPose) setPose(initialPose)
+  }, [initialPose?.x, initialPose?.y, initialPose?.yaw, initialPose?.frame_id])
+  useEffect(() => {
+    if (poseResetVersion !== undefined && poseResetVersion > 0) setPose({ x: 0, y: 0, yaw: 0, frame_id: 'map' })
+  }, [poseResetVersion])
 
   const number = (key: 'follow_distance_m' | 'follow_tolerance_m' | 'max_linear_mps' | 'max_angular_rps') => (event: ChangeEvent<HTMLInputElement>) => setSettings(value => ({ ...value, [key]: Number(event.target.value) }))
   const save = async (event: FormEvent) => {
@@ -49,7 +55,7 @@ export default function SettingsPage({ role, robots, selectedRobot, onError, onS
       </div>
       <button type="submit" disabled={!admin}>설정 저장</button>
     </form>
-    <div className="initial-pose"><h3>선택 로봇 초기 위치</h3><p>{robot?.name ?? selectedRobot} · {robot?.mode ?? '상태 확인 중'} · 정지와 편대 해제 상태에서만 적용됩니다.</p><div className="settings-grid pose-grid"><label>X (m)<input aria-label="초기 위치 X" type="number" step="0.1" value={pose.x} disabled={!admin} onChange={event => setPose(value => ({ ...value, x: Number(event.target.value) }))} /></label><label>Y (m)<input aria-label="초기 위치 Y" type="number" step="0.1" value={pose.y} disabled={!admin} onChange={event => setPose(value => ({ ...value, y: Number(event.target.value) }))} /></label><label>Yaw (rad)<input aria-label="초기 위치 Yaw" type="number" min={-Math.PI} max={Math.PI} step="0.1" value={pose.yaw} disabled={!admin} onChange={event => setPose(value => ({ ...value, yaw: Number(event.target.value) }))} /></label></div><button type="button" disabled={!admin} onClick={applyPose}>초기 위치 적용</button></div>
+    <div className="initial-pose"><h3>선택 로봇 초기 위치</h3><p>{robot?.name ?? selectedRobot} · {robot?.mode ?? '상태 확인 중'} · 지도에서 시작점을 찍은 뒤 좌표를 확인하고 적용하세요. 정지와 편대 해제 상태에서만 적용됩니다.</p><div className="settings-grid pose-grid"><label>X (m)<input aria-label="초기 위치 X" type="number" step="0.1" value={pose.x} disabled={!admin} onChange={event => setPose(value => ({ ...value, x: Number(event.target.value) }))} /></label><label>Y (m)<input aria-label="초기 위치 Y" type="number" step="0.1" value={pose.y} disabled={!admin} onChange={event => setPose(value => ({ ...value, y: Number(event.target.value) }))} /></label><label>Yaw (rad)<input aria-label="초기 위치 Yaw" type="number" min={-Math.PI} max={Math.PI} step="0.1" value={pose.yaw} disabled={!admin} onChange={event => setPose(value => ({ ...value, yaw: Number(event.target.value) }))} /></label></div><button type="button" disabled={!admin} onClick={applyPose}>초기 위치 적용</button></div>
     {notice && <p className="settings-notice">{notice}</p>}
   </section>
 }

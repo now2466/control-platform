@@ -1,0 +1,10 @@
+builtin_interfaces/Time stamp
+string robot_id
+string mode
+bool stop_latched
+string active_command_id
+string command_state
+string reason_code
+string[] capabilities
+float64 linear_mps
+float64 angular_rps

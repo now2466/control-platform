@@ -88,10 +88,12 @@ class CommandDispatcher:
             values = {item["state"] for item in states}
             if values == {"CONFIRMED"}:
                 self.storage.set_command_state(command_id, "SUCCEEDED")
-                del self._active_stops[command_id]
+                # A watchdog tick and a test/client shutdown can observe the
+                # same completed stop concurrently.  Completion is idempotent.
+                self._active_stops.pop(command_id, None)
             elif values.issubset({"CONFIRMED", "UNCONFIRMED"}) and "UNCONFIRMED" in values:
                 self.storage.set_command_state(command_id, "TIMED_OUT")
-                del self._active_stops[command_id]
+                self._active_stops.pop(command_id, None)
 
     async def start(self) -> None:
         if self._task is None:

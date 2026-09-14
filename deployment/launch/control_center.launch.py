@@ -6,21 +6,33 @@ prevents accidentally sharing one bridge between robots.
 """
 from __future__ import annotations
 
+import os
+
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess
+
+
+def _ros_process_environment(domain_id: str) -> dict[str, str]:
+    # A developer venv can provide a different `python3` without Debian's
+    # dist-packages (notably bson). rosbridge is a system ROS executable, so
+    # make its shebang resolve to the system interpreter while retaining the
+    # sourced ROS path and all other environment variables.
+    path = os.environ.get("PATH", "")
+    system_first_path = os.pathsep.join(("/usr/bin", "/bin", path))
+    return {"ROS_DOMAIN_ID": domain_id, "PATH": system_first_path}
 
 
 def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         ExecuteProcess(
             cmd=["ros2", "run", "rosbridge_server", "rosbridge_websocket", "--port", "9090"],
-            additional_env={"ROS_DOMAIN_ID": "12"},
+            additional_env=_ros_process_environment("12"),
             output="screen",
             name="rosbridge_robot_1",
         ),
         ExecuteProcess(
             cmd=["ros2", "run", "rosbridge_server", "rosbridge_websocket", "--port", "9091"],
-            additional_env={"ROS_DOMAIN_ID": "13"},
+            additional_env=_ros_process_environment("13"),
             output="screen",
             name="rosbridge_robot_2",
         ),

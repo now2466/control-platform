@@ -22,8 +22,8 @@
 헤더는 고정한다. 본문 좌측 72%, 우측 28%; 지도 높이 기본 360px, 영상은 16:9. 작은 화면에서는 스크롤을 허용하며 지도 다음에 영상, 다음에 상세 패널을 배치한다. 화면에 맞추려고 지도를 읽기 어려울 만큼 축소하지 않는다.
 
 - 지도 로봇 클릭과 영상 카드 선택은 같은 선택 상태를 공유한다. 마스터 청색, 슬레이브 주황색이며 역할 텍스트를 함께 표시한다.
-- 지도 클릭으로 목표 위치, 드래그로 방향을 정하고 미리보기 후 `임무 시작`을 누른다. 슬레이브 선택 상태라도 편대 임무 목표의 대상이 마스터임을 명시한다.
-- 지도 셀 원점의 위치·회전을 적용해 world↔canvas 변환을 수행한다. 화면 y축 반전과 줌/팬의 역변환을 포함한다. 점유/미상 셀은 기본 목표 지정 불가, 로봇 footprint 통과 가능성은 Nav2 결과로 판정한다.
+- 지도에서 `시작점 설정` 또는 `도착점 설정` 모드를 선택한 뒤 클릭/드래그로 위치와 방향을 정한다. 단일 로봇 지도 주행은 선택 로봇의 시작점·방향과 도착점·방향을 모두 지정한 뒤 `시작점에서 도착점으로 이동` 버튼을 눌러야 요청된다. `위치 재설정(AMCL)`은 로봇을 들어 옮긴 뒤 정지 상태에서 시작점만 AMCL에 적용하고 지도 파일은 유지한다. 클릭만으로 즉시 주행하지 않으며, `설정 초기화`는 두 후보와 입력값을 지운다. 슬레이브 선택 상태라도 편대 임무 목표의 대상이 마스터임을 명시한다.
+- 지도 셀 원점의 위치·회전을 적용해 world↔canvas 변환을 수행한다. 화면 y축 반전과 줌/팬의 역변환을 포함한다. 점유/미상 셀은 시작점·목표점·AMCL 위치 재설정 모두 지정 불가이며, 로봇 footprint 통과 가능성은 Nav2 결과로 판정한다.
 - TF가 없으면 마지막 위치를 회색으로 남기고 경과 시간을 표시한다. TF 없는 두 위치로 상대 거리를 계산하지 않는다.
 - 영상은 로봇별 독립 로딩·재연결. 2초간 새 프레임이 없으면 영상 위 `영상 지연/끊김` 오버레이, 5초 후 마지막 영상을 가린다. 다른 로봇 영상으로 대체하지 않는다.
 - 확대 보기에도 선택 로봇 이름과 긴급정지 접근성을 유지한다.
@@ -117,7 +117,31 @@ type Command = {
 
 로봇 최종 출력은 `정지 래치 > watchdog > 유효한 수동 제어 > 활성 자율/추종` 우선순위로 중재한다. Nav2·추종·수동 제어가 최종 cmd_vel에 동시에 발행하지 않도록 로봇 담당이 remap한다. 기존 cmd_vel에 0을 한 번 발행하는 방식으로 대체하지 않는다.
 
-제어권 lease는 3초, UI는 1초마다 갱신. 수동 패킷은 10Hz, 로봇의 수동 명령 만료는 300ms. 전체 원격 운용 heartbeat 만료는 1초이며 로봇 측에서 정지 래치한다. 브라우저 제어권 소실 시 서버는 편대를 정지시키고, 서버 자체 단절은 로봇 watchdog이 처리한다. 수동 제어 진입은 임무 PAUSED, 양쪽 정지 확인, 선택 로봇 모드 전환 응답 후 허용한다. 종료 시 IDLE이며 자동 추종 복귀 없음.
+제어권 lease는 3초, UI는 1초마다 갱신. 수동 패킷은 10Hz, 로봇의 수동 명령 만료는 300ms. 전체 원격 운용 heartbeat 만료는 1초이며 로봇 측에서 정지 래치한다. 브라우저 제어권 소실 시 서버는 편대를 정지시키고, 서버 자체 단절은 로봇 watchdog이 처리한다. 로그인 세션 만료는 그 세션이 현재 제어 lease를 소유한 경우에만 제어권 소실로 처리한다. 제어권을 보유하지 않은 과거 로그인 세션의 만료·정리는 현재 운용 중인 로봇을 정지시키지 않는다. 수동 제어 진입은 임무 PAUSED, 양쪽 정지 확인, 선택 로봇 모드 전환 응답 후 허용한다. 종료 시 IDLE이며 자동 추종 복귀 없음.
+
+### 4.4 지도 주행·재현지화
+
+`map_260905`는 현장 `map_260905.world`의 collision box를 rasterize한 정적 점유 지도다. 이 단일 로봇 시험 배포는 SLAM으로 지도를 다시 만들지 않고 `nav2_map_server`와 AMCL을 사용한다. 따라서 시험 중 로봇을 들어 임의 위치로 옮겨도 지도를 초기화하지 않는다. 바뀌는 것은 로봇의 추정 위치이며, 새 시작점을 AMCL에 다시 알려야 한다.
+
+단일 로봇의 지도 주행 요청은 다음 순서를 따른다.
+
+1. 선택 로봇의 제어권을 획득하고 로봇이 ONLINE/FRESH이며 정지한 상태인지 확인한다.
+2. 지도에서 `시작점 설정`으로 실제 로봇을 둔 자유 셀과 방향을 지정한다. 현재 map pose를 그대로 재사용하려면 `현재 위치를 시작점으로`를 누르거나 시작점 설정 모드에서 선택 로봇 마커를 누른다. 이 경우 화면 클릭 오차 없이 선택 로봇의 최신 FRESH map 위치와 방향을 시작점 마커에 복사하며, 실제 `/initialpose` 발행은 다음 위치 재설정 단계에서만 수행한다.
+3. 로봇을 들어 옮겼거나 위치가 의심되면 `위치 재설정(AMCL)`을 눌러 `/initialpose`만 발행한다. 이 복구 동작은 기존 map pose/TF의 FRESH 여부를 요구하지 않으며, 로봇 연결·정지·정지 속도 허용오차·편대/임무 안전 조건은 유지한다. Pinky Pro encoder의 정지 양자화 잡음을 반영해 `|linear| ≤ 0.01 m/s`, `|angular| ≤ 0.03 rad/s`를 정지로 판정한다. 이 단계는 주행을 시작하지 않는다.
+4. 정지 래치가 걸려 있으면 운영자가 `정지 해제`를 명시적으로 수행한다. 정지 해제는 이전 목표를 재개하지 않는다.
+5. `도착점 설정`으로 자유 셀과 방향을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
+
+서버는 활성 지도·map frame·점유 상태·로봇 신선도·정지·편대/임무 상태·`navigate` capability를 확인한다. 시작점 또는 도착점이 점유/미상 셀이면 `MAP_POINT_BLOCKED`로 거부한다. 수락된 요청은 시작점 `/initialpose` → `AUTO` 모드 → 로봇 watchdog의 `NavigateToPose` action 요청 순서로 실행된다. Nav2 controller/recovery 출력은 `/control/nav_velocity`로만 들어가고 watchdog만 최종 `/cmd_vel`을 발행한다. `stop`은 Nav2 goal을 취소하며, 통신 복구나 정지 해제 후 자동 재개하지 않는다.
+
+관제 화면은 명령 거절·Nav2 실패·완료 시간 초과 같은 동작 오류를 backend 연결 장애와 구분해 표시한다. `fetch` 자체의 네트워크 실패일 때만 개발 구성의 backend/Vite proxy 확인 안내를 노출하며, 정상 HTTP 응답으로 전달된 오류에는 해당 안내를 덧붙이지 않는다.
+
+실물 Pinky의 목표 도달 판정은 지도 클릭 목표와 실제 정지 위치 사이의 평면 거리가 0.08m 이내이고 방향 오차가 0.17rad(약 10도) 이내일 때 성공으로 본다. 이는 0.25m 기본 허용오차로 인해 목표 약 0.22m 전에 성공 처리된 robot_2 현장 결과를 반영한 값이다. 최종 위치 오차는 현장 시험에서 기록하며, 허용오차를 줄인 뒤 진동·시간 초과가 발생하면 제어기와 감속 설정을 함께 재조정한다.
+
+AMCL이 `/initialpose`를 받은 뒤 `map→odom→base_footprint` TF를 발행하기까지는 수 초가 걸릴 수 있다. 관제는 initial pose의 stamp를 0으로 보내 최신 TF를 사용하게 한다. 정지 해제는 이 TF를 대신 만들지 않는다. robot_2 Nav2 session은 고정된 2초 타이머로 navigation lifecycle을 활성화하지 않고, 해당 TF가 확인될 때까지 lifecycle startup을 대기·재시도한다. TF가 확인되기 전에는 지도 주행 버튼을 비활성화하고, TF가 사라지거나 startup이 실패해도 goal을 전송하지 않는다. 비활성 버튼 아래에는 제어권·연결·정지·TF 등 충족되지 않은 조건을 구체적으로 표시한다.
+
+Nav2 session은 navigation을 시작하기 전에 hardware bringup의 `/start_motor` 서비스를 호출해 SLLidar 스캔을 시작한다. `/scan`이 발행되지 않으면 AMCL과 map TF가 준비되지 않으므로 session을 명확한 오류로 종료하며, 라이다 publisher가 토픽에 등록된 것만으로 준비 완료로 간주하지 않는다.
+
+지도 가장자리의 픽셀은 벽으로 rasterize될 수 있으므로 화면 우측 상단 모서리 자체를 시작점으로 사용하지 않는다. 실제 시작 위치와 일치하는 우측 상단 안쪽의 자유 셀을 클릭한다.
 
 ## 5. REST·실시간 API
 
@@ -129,7 +153,9 @@ type Command = {
 | POST `/control-lease` | request_id | lease_id,expires_at; 충돌은 409 |
 | PATCH/DELETE `/control-lease/{id}` | request_id | 갱신/반납; 소유자만 |
 | GET `/robots` | 없음 | 로봇 설정·capabilities 목록 |
-| POST `/robots/{id}/initial-pose` | request_id,pose,covariance(36개) | 정지 상태에서 command |
+| POST `/robots/{id}/initial-pose` | request_id,pose | 정지·편대 해제·유효한 지도 TF 상태에서 command |
+| POST `/robots/{id}/localization-reset` | request_id,lease_id,map_id,pose | 선택 로봇이 연결되고 정지한 상태에서 `/initialpose`만 발행. 기존 pose/TF가 stale이어도 복구 가능. 정적 지도 유지, AMCL 추정 위치만 갱신 |
+| POST `/robots/{id}/navigate` | request_id,lease_id,map_id,start_pose,goal | 자유 셀·상태·capability 검증 후 start pose → AUTO → Nav2 `NavigateToPose` 요청 |
 | POST `/missions` | request_id,name,map_id,waypoints,repeat_count | DRAFT mission |
 | GET `/missions` | cursor,limit(최대100),state,from,to | items,next_cursor |
 | GET `/missions/{id}` | 없음 | Mission |
@@ -155,7 +181,7 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 상태 WS `/ws/state`: `{type,seq,server_time,payload}`. type은 snapshot/robot_state/formation/mission/command/alert/camera_status. 최초 snapshot, 이후 상태 5Hz와 이벤트 즉시 전송. 클라이언트 sequence 누락 시 GET state 재동기화. 느린 클라이언트 큐 100개 초과 시 연결 종료 후 snapshot으로 복구, 명령 결과는 DB로 조회 가능.
 
-수동 WS `/ws/teleop`: `{lease_id,robot_id,seq,linear_mps,angular_rps}`. mode·lease·증가 seq·상한 검증, 오래된 패킷 거부. 전송 timestamp 대신 서버 수신 monotonic 시간을 watchdog 기준으로 사용한다. 연결 해제 시 즉시 중단.
+수동 WS `/ws/teleop`: `{lease_id,robot_id,seq,linear_mps,angular_rps}`. mode·lease·증가 seq·상한 검증, 오래된 패킷 거부. 전송 timestamp 대신 서버 수신 monotonic 시간을 watchdog 기준으로 사용한다. 버튼 해제·입력 timeout은 선택 로봇에 0속도를 전달하고 정지 래치를 걸지 않는다. 웹소켓 연결 해제, lease 만료, 명시적 정지와 안전 경보는 별도의 보호 정지 래치를 적용한다.
 
 영상 WS `/ws/cameras/{robot_id}`: 메시지 하나는 `4-byte big-endian 메타데이터 길이 + UTF-8 JSON + JPEG bytes`. 메타데이터는 `{frame_id,captured_at,received_at,width,height}`. 프런트엔드는 최신 프레임만 렌더링하고 기존 Blob URL 해제. 저화질 320×240/5FPS, 기본 640×480/10FPS, 고화질 1280×720/15FPS 요청을 query quality로 받되 원본보다 업스케일하지 않는다. 실제 달성 FPS와 촬영시각 유효성을 표시한다. reconnect backoff는 1/2/4/8초, 최대 8초.
 
@@ -163,24 +189,31 @@ PUT settings는 서버 로컬 설정과 로봇 적용을 구별한다. 로봇 �
 
 두 로봇이 공통 map에서 위치 추정하는 구성을 기본으로 한다. 목표 TF는 `map → robot_1/odom → robot_1/base_footprint`, robot_2도 동일하다. 각 로봇 odom 좌표를 그대로 같은 지도 좌표로 간주하지 않는다. 서로 다른 map을 쓰는 경우 보정된 map transform이 제공될 때까지 편대 시작을 차단한다.
 
-로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
+로봇마다 서로 다른 ROS_DOMAIN_ID와 rosbridge websocket endpoint를 사용한다. 로봇별 `camera.enabled=false`이면 compressed image 토픽을 구독하지 않고 카메라 센서 상태도 생성하지 않는다. 배포 고정값은 `robot_1=12`, `robot_2=13`이며 관제 UI/API의 domain 변경 기능은 제공하지 않는다. bridge URL, credentials/TLS, topic/service/action 및 compressed camera mapping은 `backend/config/robots.yaml`에 저장한다. rosbridge 단절은 reconnect backoff와 STALE/OFFLINE 전이로 표시한다. 고정 프레임을 쓰는 기존 bringup은 로봇 담당과 검증한다.
+
+실물 Pinky bringup이 namespace 없는 전역 토픽을 발행하는 경우에도 로봇별 rosbridge endpoint가 domain 격리 경계이므로, 배포 매핑은 `/odom`, `/battery/percent`, `/battery/voltage`, `/tf`, `/tf_static`, `/initialpose`, `/control/manual_velocity` 같은 전역 이름을 사용할 수 있다. 시뮬레이터 또는 namespace를 제공하는 로봇은 해당 환경의 매핑을 사용한다.
 
 | 입력/출력 | 목표 이름 (`{ns}`는 로봇 namespace) | 타입/처리 |
 |---|---|---|
 | 입력 | `/map`, `/tf`, `/tf_static` | OccupancyGrid, TFMessage. 지도 reliable/transient_local, 동적 TF 기본 tf2 정책 |
 | 입력 | `{ns}/odom`, `{ns}/scan` | Odometry, LaserScan. 센서 best_effort/volatile을 기본으로 발행자 호환 확인 |
 | 입력 | `{ns}/battery/percent`, `battery/voltage` | Float32. percent 값 범위를 실측해 0~100으로 정규화 |
-| 입력 | 설정한 compressed image 토픽 | rosbridge JSON/base64 CompressedImage를 JPEG로 변환. quality/throttle/fragment를 설정하며 별도 binary gateway는 옵션이다. |
+| 입력 | 설정한 compressed image 토픽 | 실물 Pinky는 `/camera/front` raw `Image`를 발행하고, 로봇 세션 런처가 `/camera/image_raw/compressed` `CompressedImage`로 변환한 토픽을 rosbridge JSON/base64로 전달한다. 관제는 이를 JPEG로 변환하며 quality/throttle/fragment를 설정하고 별도 binary gateway는 옵션이다. 현재 YYM 현장 프로필은 두 로봇 모두 `camera.enabled=false`로 설정해 이 입력을 구독하지 않는다. |
 | 입력 | `{ns}/plan`, `local_costmap/costmap`, `global_costmap/costmap` | Path 및 실제 발행 타입에 맞춘 OccupancyGrid/Costmap 어댑터 |
-| 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 자체 goal handle 추적·취소·결과 확인 |
-| 제어 | `{ns}/initialpose` | PoseWithCovarianceStamped, 정지 시 허용 |
+| 제어 | `{ns}/navigate_to_pose` | NavigateToPose action. 로봇 watchdog가 자체 goal handle을 추적·취소하고 ControlStatus에 capability/상태를 보고 |
+| 제어 | 설정한 initial pose 토픽 (실물 Pinky: `/initialpose`) | PoseWithCovarianceStamped, 정지 시 허용 |
 | 제어 | `{ns}/set_led`, `{ns}/set_lamp` | 기존 pinky_interfaces 서비스 정의를 읽고 필드 매핑 |
 | 신규 입력 | `{ns}/control/status` | 아래 ControlStatus, 10Hz heartbeat |
 | 신규 제어 | `{ns}/control/command` | 아래 ControlCommand service, reliable, 2초 수락 제한 |
+| 신규 출력 | `{ns}/control/nav_velocity` | Twist. Nav2 controller/recovery의 입력을 watchdog로 중계하며 최종 `/cmd_vel` 직접 발행 금지 |
 | 신규 입력 | `{slave_ns}/follow/status` | 아래 FollowStatus, 5Hz |
 | 신규 제어 | `{slave_ns}/follow/command` | 아래 FollowCommand service; 장기 완료는 status command_id로 상관 |
 | 신규 출력 | `{ns}/control/manual_velocity` | TwistStamped, 10Hz. 최종 cmd_vel에 직접 발행 금지 |
 | 신규 출력 | `{ns}/control/heartbeat` | std_msgs/UInt64, 10Hz 증가 counter; 수신 간격으로 watchdog 판단 |
+
+현재 rosbridge adapter는 `/tf`·`/tf_static`의 `TFMessage`와 odom을 로봇별로 수신하고, TF graph를 합성해 `map` 기준 pose를 만든다. 지도 TF 경로가 없으면 pose는 `tf_valid=false`, `MAP_TF_UNVERIFIED`로 유지한다. 초기 위치 API와 지도 주행은 설정한 initial pose 토픽(실물 Pinky는 `/initialpose`)에 stamp 0의 `PoseWithCovarianceStamped`를 발행해 최신 TF를 사용한다. 지도 주행 실행기는 start pose를 먼저 발행하고 `AUTO` 모드와 `navigate` ControlCommand를 순서대로 요청한다. 실물 robot_2의 watchdog는 이 명령을 `/navigate_to_pose` action으로 연결하며 Nav2 출력은 `/control/nav_velocity`로 받고 최종 `/cmd_vel`을 단독 발행한다. 현재 API 입력에는 covariance를 받지 않고 36개 0값을 사용한다. 수동 WS 입력은 검증 후 설정한 중재 토픽(실물 Pinky는 `/control/manual_velocity`)에 `TwistStamped`를 발행한다. 이 동작은 adapter contract test로 검증했지만 실제 ROS graph·QoS·AMCL 초기화·Nav2 action·안전 중재기는 현장 gate에서 별도 확인한다.
+
+실물 진단용 Scan 오버레이는 로봇별 rosbridge의 `/scan`을 200ms throttle로 구독한다. 서버는 LaserScan의 frame에서 `map`까지 TF를 합성해 최대 2000개 유효 반사점을 map 좌표로 변환하고, Scan 레이어를 선택한 브라우저가 센서 상세 API를 최대 5Hz로 갱신한다. 0.2m 미만은 빨강, 0.5m 미만은 주황, 그 이상은 청록으로 표시하며 최근접 거리와 점 개수를 함께 보여준다. Scan 지연 또는 map TF 부재 시 과거 점을 재사용하지 않고 빈 레이어와 reason code를 표시한다.
 
 신규 인터페이스는 `pinky_control_interfaces`에서 아래 필드로 정의한다. 로봇 팀이 이미 다른 인터페이스를 제공하면 타입·명령 ID·완료 확인 의미를 보존하는 어댑터를 구현한다.
 
@@ -194,6 +227,8 @@ string active_command_id
 string command_state
 string reason_code
 string[] capabilities
+float64 linear_mps
+float64 angular_rps
 
 # srv/ControlCommand.srv
 string command_id
@@ -222,7 +257,9 @@ bool accepted
 string reason_code
 ```
 
-ControlCommand operation은 stop/reset_stop/set_mode/apply_settings만 허용하고 parameters_json은 operation별 스키마 검증한다. set_mode는 mode, apply_settings는 version/values, stop/reset_stop은 빈 객체. FollowCommand operation은 pair/start/pause/unpair/rejoin. 서비스 accepted는 수락일 뿐이며 ControlStatus/FollowStatus가 완료를 확인한다. 거리 미측정은 measurement_valid=false로 제공한다. 양쪽 서버는 command_id 중복을 실행하지 않는다.
+ControlCommand operation은 stop/reset_stop/set_mode/apply_settings/navigate/cancel_navigation을 허용하고 parameters_json은 operation별 스키마 검증한다. set_mode는 mode, apply_settings는 version/values, stop/reset_stop/cancel_navigation은 빈 객체 또는 취소 사유, navigate는 goal/map_id/navigation_id를 받는다. FollowCommand operation은 pair/start/pause/unpair/rejoin. 서비스 accepted는 수락일 뿐이며 ControlStatus/FollowStatus가 완료를 확인한다. `navigate`의 accepted는 Nav2 목표 요청 접수이며 최종 action 결과와 진행 상태는 로봇 ControlStatus에 남긴다. 거리 미측정은 measurement_valid=false로 제공한다. 양쪽 서버는 command_id 중복을 실행하지 않는다.
+
+실물 Pinky의 안전 중재 구현은 `ros/pinky_control_watchdog` 패키지다. 시작 시 정지 래치를 걸고, `reset_stop`은 자동 재개 없이 IDLE로만 전환한다. `set_mode: MANUAL` 이후에만 `TwistStamped` 수동 입력을 허용하며, 입력이 0.35초 이상 끊기면 `/cmd_vel`에 0을 계속 발행한다. 선속도·각속도는 각각 0.15m/s·0.50rad/s로 한 번 더 제한한다. `AUTO`·`FOLLOW` 입력은 `/control/nav_velocity`에서 받되 Nav2 연결 전에는 사용하지 않는다. `navigate`는 `NavigateToPose` action server가 준비된 경우에만 수락하고, stop/reset_stop/cancel_navigation 시 활성 goal을 취소하며 자동 재개하지 않는다. `/cmd_vel`에는 이 중재기만 연결하고 관제 adapter는 직접 발행하지 않는다.
 
 필수 노드 감시는 ROS graph 존재 확인과 control heartbeat를 나란히 제공한다. 그래프에 노드가 존재한다고 정상 실행으로 판정하지 않는다. 센서 stale도 분리한다. 센서 시간/수신 시각/monotonic watchdog 시간을 혼합하지 않는다. 시뮬레이션 ROS time 정지는 데이터 stale로 표시하고 watchdog은 wall monotonic으로 유지한다.
 

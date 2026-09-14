@@ -1,6 +1,6 @@
 # Pinky Pro 관제 플랫폼 사용자 가이드
 
-이 문서는 현재 구현된 관제 플랫폼을 실행하고 사용하는 방법을 설명한다. 전체 기능을 확인하려면 먼저 mock 모드로 실행한다. ROS 모드는 두 rosbridge 연결과 상태 수신 adapter를 제공하지만, 실제 목표 주행에는 로봇 측 control/follow 계약과 Nav2, TF, 카메라 변환 연결이 추가로 필요하다.
+이 문서는 현재 구현된 관제 플랫폼을 실행하고 사용하는 방법을 설명한다. 전체 기능을 확인하려면 먼저 mock 모드로 실행한다. ROS 모드는 두 rosbridge 연결과 상태 수신 adapter를 제공하며, robot_2에는 안전 수동 주행용 control watchdog를 별도로 설치할 수 있다. 목표 주행은 Nav2, 정적 점유 지도, AMCL/TF 검증이 끝난 뒤 진행한다.
 
 ## 1. 처음 실행하기
 
@@ -45,6 +45,8 @@ npm run dev
 
 브라우저에서 `http://localhost:5173`을 열고 앞에서 만든 계정으로 로그인한다. 상단에 `실시간 연결`이 표시되면 상태 WebSocket이 정상적으로 연결된 것이다.
 
+화면의 오류가 `관제 백엔드에 연결할 수 없습니다`이면 `127.0.0.1:8081` backend와 Vite proxy를 확인한다. `STOP_LATCHED`, TF, 지도 좌표, 명령 시간 초과처럼 구체적인 동작 오류가 표시되면 backend는 응답 중인 것이므로 그 오류 원인을 확인한다. 동작 오류에는 backend 실행 안내가 함께 표시되지 않는다.
+
 ## 2. 화면 구성
 
 현재 UI는 한 화면에서 다음 영역을 위에서 아래로 배치한다.
@@ -84,12 +86,17 @@ npm run dev
 - 회색 로봇이나 `위치 지연` 표시는 위치 또는 TF가 유효하지 않다는 뜻이다.
 - TF가 유효하지 않으면 편대 거리와 방위각을 표시하지 않는다.
 
-목표는 지도에서 **클릭한 상태로 드래그한 뒤 놓아서** 지정한다.
+지도 상단의 `시작점 설정` 또는 `도착점 설정` 버튼을 누른 뒤 **클릭한 상태로 드래그하고 놓아서** 지정한다.
 
-- 처음 누른 지점이 목표 위치다.
-- 드래그한 방향이 도착 방향이다.
+- `시작점 설정`은 선택 로봇의 초기 위치 후보를 만든다.
+- `도착점 설정`은 목표 위치와 도착 방향을 만든다.
+- 처음 누른 지점이 위치이고, 드래그한 방향이 방향이다.
+- `설정 초기화`는 시작점·도착점 후보를 모두 지운다.
 - 점유 셀이나 알 수 없는 셀에는 목표를 지정할 수 없다.
-- 이 조작은 목표 미리보기와 waypoint만 만들며 즉시 로봇을 움직이지 않는다.
+- 지도 클릭만으로는 로봇을 움직이지 않는다. 단일 로봇 주행은 시작점·방향과 도착점·방향을 모두 지정한 뒤 `시작점에서 도착점으로 이동`을 눌러야 한다.
+- `위치 재설정(AMCL)`은 로봇을 손으로 들어 다른 위치에 둔 뒤 새 시작점을 AMCL에 적용하는 버튼이다. 기존 위치나 map TF가 지연된 상태에서도 복구에 사용할 수 있으며, 로봇은 연결된 정지 상태여야 한다. encoder의 정지 잡음은 선속도 0.01 m/s 이하, 각속도 0.03 rad/s 이하까지 0으로 취급한다. 정적 `map_260905` 파일은 지우거나 다시 그리지 않는다.
+- 위치 재설정이나 이동 버튼이 비활성화되면 버튼 아래의 `위치 재설정 불가` 또는 `이동 불가` 문구에서 제어권, 연결, 정지, TF 등 준비되지 않은 조건을 확인한다.
+- 점유/미상 셀은 시작점·도착점·AMCL 위치로 사용할 수 없다. 지도 우측 상단 모서리 자체는 벽일 수 있으므로 실제 위치와 맞는 안쪽 자유 셀을 선택한다.
 
 한 지점만 지정하면 단일 목표 임무가 되고, 여러 지점을 차례로 지정하면 순찰용 waypoint 목록이 된다.
 
@@ -138,6 +145,21 @@ DRAFT → READY → RUNNING → SUCCEEDED
 
 `시작` 버튼이 비활성화되었다면 제어권, `READY` 편대, 활성 지도, waypoint, 임무 검증 여부를 확인한다.
 
+### 6.1 단일 로봇 지도 주행과 재설정
+
+robot_2 한 대를 시험할 때는 편대를 구성하지 않고 다음 순서로 운용한다.
+
+1. 선택 로봇을 확인하고 `제어권 획득`을 누른다.
+2. 로봇이 `ONLINE/FRESH`, 정지 상태이고 `navigate` capability가 표시되는지 확인한다.
+3. 로봇을 실제 시작 위치에 둔 뒤 지도에서 `시작점 설정`으로 위치와 전방 방향을 지정한다.
+4. 처음 시작하거나 로봇을 들어 옮겼다면 `전체 정지` 또는 해당 로봇 정지를 먼저 확인하고 `위치 재설정(AMCL)`을 누른다. 이 동작은 지도 초기화나 주행을 수행하지 않는다.
+5. 정지 래치가 남아 있으면 `robot_2 정지 해제`를 명시적으로 누른다. 이전 Nav2 목표는 자동으로 재개되지 않는다.
+6. `도착점 설정`으로 자유 셀의 목표와 방향을 지정하고 `시작점에서 도착점으로 이동`을 누른다.
+
+주행 중 벽에 부딪혔거나 시험을 다시 시작해야 하면 즉시 물리 정지 수단과 UI 정지를 사용하고, 속도가 0인 것을 확인한 뒤 로봇을 들어 안전한 임의 지점으로 옮긴다. 새 시작점 지정 → `위치 재설정(AMCL)` → 정지 해제 → 새 도착점 지정 순서를 다시 따른다. `stop`은 활성 Nav2 goal을 취소하며 통신 복구나 정지 해제만으로 자동 주행하지 않는다.
+
+정확한 우측 상단 모서리는 지도 경계/벽 셀일 수 있다. 화면의 우측 상단에 실제 로봇을 놓더라도 모서리 픽셀에서 조금 안쪽인 자유 셀을 클릭해야 하며, 서버가 `MAP_POINT_BLOCKED`를 반환하면 더 안쪽의 실제 바닥 위치를 선택한다.
+
 ## 7. 긴급 정지와 재개
 
 긴급 정지 영역에서 `전체 정지`, `robot_1 정지`, `robot_2 정지`를 선택할 수 있다.
@@ -165,9 +187,9 @@ ADMIN은 다음 값을 변경할 수 있다.
 - 최대 선속도와 최대 각속도
 - 기본 카메라 화질
 
-초기 위치는 먼저 로봇 카드나 지도에서 대상을 선택하고 X, Y, Yaw를 입력한 뒤 `초기 위치 적용`을 누른다. 로봇이 정지했고 편대가 해제된 상태에서만 적용한다.
+관리자용 `초기 위치 적용`은 기존 설정 API로, 정지·편대 해제·유효한 지도 TF 조건을 확인한다. 현장 시험에서 로봇을 들어 옮긴 뒤 쓰는 `위치 재설정(AMCL)`은 별도 operator API이며 기존 위치/TF 신선도와 무관하게 연결·정지·속도 0 상태에서 stamp 0의 `/initialpose`만 발행한다. 두 동작 모두 자동 주행을 시작하지 않는다.
 
-ROS 모드에서는 로봇 측 설정 계약이 준비되기 전까지 설정과 초기 위치 적용이 거절될 수 있다.
+ROS 모드에서는 배포 설정에 지정된 초기 위치·수동 입력 토픽으로 전달된다. 실물 Pinky 매핑은 `/initialpose`와 `/control/manual_velocity`이며, 시뮬레이터처럼 namespace가 필요한 환경은 설정 파일에서 별도로 지정한다. robot_2 session script는 `pinky_control_watchdog`를 함께 시작해 `/control/manual_velocity`를 제한·감시한 뒤 `/cmd_vel`로 전달한다. 시작 직후에는 정지 래치가 걸리므로 제어권 획득 → 선택 로봇의 `robot_2 정지 해제` → `MANUAL 모드 전환` 순서로 준비한다. `정지 해제`는 자동 주행을 재개하지 않는다.
 
 ## 10. 경고와 운용 이력
 
@@ -186,11 +208,11 @@ ROS 모드에서는 로봇 측 설정 계약이 준비되기 전까지 설정과
 
 수동 조작은 선택한 로봇에 적용된다. 제어권과 로봇의 `MANUAL` 모드가 모두 필요하다.
 
-- `전진` 또는 `좌회전` 버튼을 누르는 동안 10 Hz로 명령을 보낸다.
+- `MANUAL 모드 전환`을 누른 뒤 `전진` 또는 `좌회전` 버튼을 누르는 동안 10 Hz로 명령을 보낸다.
 - 버튼을 놓거나 포인터가 버튼 밖으로 나가면 0 속도를 보낸다.
 - 탭 전환, 브라우저 비활성화, 연결 종료 시 정지한다.
 
-현재 UI에는 로봇을 `MANUAL` 모드로 전환하는 기능이 없다. mock 기본 상태에서는 버튼이 비활성화되며, 실제 사용에는 로봇 측 control mediator와 모드 전환 계약이 필요하다.
+robot_2의 watchdog는 입력이 0.35초 이상 끊기면 `/cmd_vel`에 0을 발행한다. 관제 백엔드도 정상적인 버튼 해제·입력 timeout에는 선택 로봇에 0속도만 전달하므로, 다음 수동 입력마다 정지 해제를 다시 누를 필요가 없다. 웹소켓 단절, lease 만료, 명시적 정지 또는 안전 경보가 발생한 경우에는 보호 정지 래치가 유지되며 다시 `정지 해제` 후 `MANUAL 모드 전환`을 해야 한다. 그래도 실제 시험에서는 긴급 정지 버튼과 로봇 전원 차단 수단을 준비한다. 실물 control interface가 설치되지 않은 환경에서는 모드 전환과 명령이 거절되거나 `UNSUPPORTED`로 표시된다.
 
 ## 12. 현재 가능한 시험과 ROS 제한
 
@@ -205,16 +227,50 @@ mock 모드에서는 다음 흐름을 확인할 수 있다.
 - 경고 확인
 - 설정, 초기 위치와 운용 이력
 
-ROS 모드는 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`에 각각 연결되는 rosbridge adapter와 상태·배터리·경로·압축 카메라 수신을 제공한다. Domain ID는 UI에서 변경하지 않는다.
+ROS 모드는 `robot_1=ROS_DOMAIN_ID 12`, `robot_2=ROS_DOMAIN_ID 13`에 각각 연결되는 rosbridge adapter와 상태·배터리·경로 수신을 제공한다. 현재 YYM 현장 프로필은 대역폭 확보를 위해 두 로봇의 카메라 발행과 관제 카메라 구독을 비활성화한다. Domain ID는 UI에서 변경하지 않는다.
+
+YYM Wi-Fi에서 두 대를 동시에 연결할 때의 현재 주소는 `robot_1=172.20.10.9`, `robot_2=172.20.10.8`이다. robot_1은 PC에서 domain 12 rosbridge를 `127.0.0.1:9090`으로 실행하고, robot_2는 로봇 내부 domain 13 rosbridge의 `172.20.10.8:9091`을 사용한다. 두 로봇의 DHCP 주소가 바뀌지 않도록 공유기에서 각 MAC 주소에 대한 DHCP 예약을 설정한다.
 
 Gazebo 또는 실물에서 목표 주행을 시험하려면 다음 외부 연결이 추가로 필요하다.
 
 - 겹치지 않는 위치에 두 로봇을 생성하는 dual-robot launch
 - domain 12/13 각각의 `ros_gz_bridge`와 rosbridge
-- 로봇별 Nav2 또는 관제용 control mediator
+- 로봇별 Nav2와 관제용 control mediator
 - 슬레이브 follow controller와 정지 latch/watchdog
-- raw 카메라의 `CompressedImage` 변환
 - `map → robot_N/odom → robot_N/base_footprint` TF 검증
 
-이 계약이 준비되지 않은 ROS 환경에서 이동 명령이 `UNSUPPORTED`로 거절되는 것은 정상 동작이다. ROS 실행과 현장 인수 절차는 프로젝트 루트의 `runbook.md`와 `acceptance-report.md`를 따른다.
+robot_2 실물 시험의 권장 기동 방법은 `deployment/scripts/start-pinky-robot2-all.sh` 하나로 hardware bringup과 관제 세션을 함께 실행하는 것이다. 이 스크립트는 부팅 때 domain 0으로 실행되는 기존 `rosy-session-bringup.service`와 `rosy-session-control.service`를 먼저 중지하고, `ROS_DOMAIN_ID=13`에서 `/odom`·`/scan`을 확인한 뒤 `start-pinky-robot2-session.sh`를 실행한다. 하위 session script는 watchdog, Nav2, `rosbridge_websocket:9091`을 한 수명 주기로 관리하며 카메라 프로세스는 시작하지 않는다. 두 스크립트 모두 `ROS_LOCALHOST_ONLY`를 해제한다.
 
+두 스크립트를 로봇에 복사하고 실행 권한을 부여한다.
+
+```bash
+scp deployment/scripts/start-pinky-robot2-session.sh \
+  pinky@<robot-2-ip>:/home/pinky/start-pinky-robot2-session.sh
+scp deployment/scripts/start-pinky-robot2-all.sh \
+  pinky@<robot-2-ip>:/home/pinky/start-robot2.sh
+ssh pinky@<robot-2-ip> \
+  'chmod +x /home/pinky/start-pinky-robot2-session.sh /home/pinky/start-robot2.sh'
+```
+
+이후 로봇을 재부팅할 때마다 로봇 Wi-Fi 연결과 SSH 접속 후 아래 한 줄만 실행한다.
+
+```bash
+/home/pinky/start-robot2.sh
+```
+
+`Robot_2 all-in-one session is ready.`가 출력되면 웹을 새로고침하고 `robot_2`를 선택한다. 재부팅하면 AMCL 추정 위치는 유지되지 않으므로 실제 위치와 방향을 지도에 지정하고 `위치 재설정(AMCL)`을 반드시 한 번 수행한다. `Ctrl+C`를 누르면 wrapper가 session을 먼저 종료해 속도 출력을 멈춘 뒤 hardware bringup을 종료한다. SSH 연결이 끊어지면 세션도 종료되는 foreground 운용이 기본이다.
+
+control interface와 watchdog를 처음 설치할 때는 로봇에서 control workspace를 빌드한다. 저장소의 `ros/pinky_control_interfaces`와 `ros/pinky_control_watchdog` 디렉터리를 `/home/pinky/dev_ws/wj/src/` 아래에 복사한 뒤 다음을 실행한다.
+
+```bash
+cd /home/pinky/dev_ws/wj
+colcon build --symlink-install --packages-select pinky_control_interfaces pinky_control_watchdog
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+```
+
+그 다음 `start-robot2.sh`를 실행한다. 하위 session script의 READY 출력에 `control: /control/manual_velocity -> /cmd_vel (watchdog)`가 있어야 한다.
+
+문제 분리를 위해 기존 `start-pinky-robot2-session.sh`만 직접 실행할 수도 있지만 이 경우 hardware bringup은 별도 터미널에서 domain 13으로 실행해야 한다. 통합 wrapper는 bringup까지 소유하고 종료한다. 실행 중인 로봇은 정지 상태에서 시험한다.
+
+현재 단계의 실물 자동 주행은 robot_2 한 대의 Nav2 action server·AMCL·`map→odom→base_footprint` TF·정적 occupancy map을 확인한 뒤 저속으로 시작한다. 지도 클릭은 명시적 이동 버튼 전까지 주행을 시작하지 않으며, 로봇을 들어 옮긴 뒤에는 정적 지도 대신 AMCL 위치를 재설정한다. ROS 실행과 현장 인수 절차는 프로젝트 루트의 `runbook.md`와 `acceptance-report.md`를 따른다.

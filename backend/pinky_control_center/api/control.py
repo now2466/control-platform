@@ -118,11 +118,12 @@ async def teleop(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     last_seq = -1
+    active_robot_id = "robot_1"
     while True:
         try:
             payload = await websocket.receive_json()
         except WebSocketDisconnect:
-            await websocket.app.state.protective_stop("robot_1")
+            await websocket.app.state.protective_stop(active_robot_id)
             return
         try:
             lease_id = UUID(str(payload["lease_id"]))
@@ -142,10 +143,19 @@ async def teleop(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"})
         else:
             last_seq = seq
+            active_robot_id = robot_id
             service = websocket.app.state.teleop_service
             try:
                 service.enter(robot_id, lease_valid=True)
             except PermissionError:
                 await websocket.send_json({"type": "rejected", "reason_code": "CONTROL_CONFLICT"}); continue
             result = service.ingest(robot_id, seq, linear, angular, limits.max_linear_mps, limits.max_angular_rps)
+            if result == "ACCEPTED":
+                publish = getattr(websocket.app.state.adapter, "publish_manual_velocity", None)
+                if publish is not None:
+                    accepted = await publish(robot_id, linear, angular)
+                    if not accepted.accepted:
+                        service.protective_stop(robot_id)
+                        await websocket.send_json({"type": "rejected", "reason_code": accepted.reason_code or "ROSBRIDGE_WRITE_FAILED"})
+                        continue
             await websocket.send_json({"type": result.lower(), "seq": seq})

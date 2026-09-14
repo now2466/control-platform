@@ -4,9 +4,9 @@
 
 이번 단계는 mock 운용 설정만 다룬다. 활성 정적 지도 선택, 추종 거리·허용 오차, 최대 선/각속도, 카메라 품질(`low`/`default`/`high`)을 SQLite의 단일 활성 설정으로 저장한다. `PUT /api/v1/settings`는 화면이 읽은 `version`을 비교해 갱신하며, 오래된 버전은 `409 SETTINGS_VERSION_CONFLICT`로 거절한다.
 
-초기 위치는 선택한 로봇이 ONLINE·FRESH이고 IDLE/STOPPED, 속도 0, 정지 래치 해제, 편대 해제 상태일 때만 `POST /api/v1/robots/{robot_id}/initial-pose`로 접수한다. 기존 command request_id 저장소를 사용하므로 같은 요청은 한 번만 adapter에 전달된다. 설정과 초기 위치 변경은 ADMIN 권한·Origin·CSRF 검증을 모두 요구한다.
+관리자용 초기 위치는 선택한 로봇이 ONLINE·FRESH이고 IDLE/STOPPED, 정지 속도 허용오차 이내, 정지 래치 해제, 편대 해제 상태일 때만 `POST /api/v1/robots/{robot_id}/initial-pose`로 접수한다. 현장 시험용 `POST /api/v1/robots/{robot_id}/localization-reset`은 operator lease를 요구하고, 로봇을 들어 옮긴 뒤 기존 map pose/TF가 stale 또는 unknown이어도 연결·정지·정지 속도 허용오차 이내이면 활성 정적 지도의 자유 셀 pose를 `/initialpose`로만 전달한다. 허용오차는 실물 encoder 정지 잡음 측정치(약 ±0.0013 m/s, ±0.026 rad/s)를 포함하는 `|linear| ≤ 0.01 m/s`, `|angular| ≤ 0.03 rad/s`이며, 이를 넘으면 `ROBOT_MOVING`으로 거부한다. 같은 요청은 한 번만 adapter에 전달되며 두 API 모두 자동 주행을 시작하지 않는다. 설정 변경은 ADMIN 권한·Origin·CSRF 검증을 모두 요구하고, localization reset/navigation은 OPERATOR 이상 권한과 lease를 요구한다.
 
-SLAM 지도 생성/저장/리셋, LED·lamp·LCD/감정 장치, 역할 교환·로봇 등록 및 실제 ROS 매핑은 이번 축소 범위에 포함하지 않는다. ROS 설정 적용은 T12에서 실제 인터페이스 계약을 확인한 뒤 구현한다.
+SLAM 지도 생성/저장/리셋은 정적 `map_260905` 운용 범위에 포함하지 않는다. 로봇을 수동 재배치할 때는 지도 대신 AMCL pose를 재설정하며, Nav2 연결은 T15에서 별도 구현한다. LED·lamp·LCD/감정 장치, 역할 교환·로봇 등록 및 기타 실제 ROS 매핑은 실제 인터페이스 계약 확인 뒤 구현한다.
 
 ## RED
 
@@ -23,6 +23,7 @@ SLAM 지도 생성/저장/리셋, LED·lamp·LCD/감정 장치, 역할 교환·�
 - 임무 생성은 READY 편대의 검증된 master/slave pair가 있어야 한다. start/resume도 저장된 map_id와 pair가 현재 활성 지도·편대와 일치하는지 다시 검사하므로, map 변경 뒤 남은 draft/READY mission을 주행시킬 수 없다.
 - `mock_lab_b`는 별도 deterministic occupancy PNG를 제공한다. 두 map은 이름, ETag, 픽셀 fixture가 같지 않다.
 - camera quality는 SettingsPage가 읽은 활성값으로 모든 CameraTile을 초기화하고, 서버 lifespan에서 저장된 설정을 mock adapter에 다시 적용한다. 재시작 뒤에도 새 frame과 UI가 여는 camera socket이 같은 품질을 사용한다.
+- 지도 주행 시작점은 지도 클릭 외에도 선택 로봇의 최신 FRESH map pose를 정확히 복사할 수 있다. `현재 위치를 시작점으로` 버튼 또는 시작점 설정 모드의 선택 로봇 마커 클릭은 마커만 갱신하며, AMCL `/initialpose` 발행은 운영자가 `위치 재설정(AMCL)`을 누를 때까지 수행하지 않는다.
 
 ## 검증
 
